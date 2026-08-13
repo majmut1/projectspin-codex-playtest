@@ -237,12 +237,12 @@
       max-width: 34rem;
     }
 
-    /* The build identifier. Small and dim: it is a diagnostic the owner should be
-       able to read on request, not a thing competing with the loading state. */
+    /* Persistent Codex build identity: readable in a screen recording while
+       remaining subordinate to the loading progress. */
     #spin-build {
-      font-size: 0.72rem;
-      opacity: 0.55;
-      letter-spacing: 0.04em;
+      font-size: 0.82rem;
+      opacity: 0.82;
+      letter-spacing: 0.055em;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
 
@@ -306,17 +306,17 @@
       or at the one Safari cached?*
 
       ⚠️ It is NOT a Godot placeholder. `scripts/deploy_playtest.ps1` substitutes
-      `02fc32f-20260813-0236` after the export, so the token survives `test_web_shell.gd`'s
+      `CX-20260814.1` after the export, so the token survives `test_web_shell.gd`'s
       placeholder check (which is about `$GODOT_*` and would fail on a deleted one)
       and a local build simply shows the token unchanged — which is itself
-      informative: a page reading "02fc32f-20260813-0236" was not deployed by the script.
+      informative: a page reading "CX-20260814.1" was not deployed by the script.
     -->
-    <p class="spin-line" id="spin-build">build 02fc32f-20260813-0236</p>
+    <p class="spin-line" id="spin-build">CODEX • CX-20260814.1</p>
   </div>
 
   <script src="index.js"></script>
   <script>
-    const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","mainPack":"index.pck?v=02fc32f-20260813-0236","experimentalVK":false,"fileSizes":{"index.pck?v=02fc32f-20260813-0236":26349080,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+    const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","mainPack":"index.pck?v=CX-20260814.1","experimentalVK":false,"fileSizes":{"index.pck?v=CX-20260814.1":26358200,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
     const GODOT_THREADS_ENABLED = false;
 
     (function () {
