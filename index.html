@@ -77,7 +77,8 @@
       --spin-ink: #e8ecf3;
       --spin-dim: #8c97a8;
       --spin-line: #232b38;
-      --spin-accent: #4da3ff;
+      --spin-accent: #35ddf2;
+      --spin-accent-two: #f058c8;
       --spin-alarm: #ff8f6b;
     }
 
@@ -105,6 +106,10 @@
       overflow: hidden;
       overscroll-behavior: none;
       background-color: var(--spin-bg);
+      background:
+        radial-gradient(circle at 28% 38%, rgba(53, 221, 242, 0.10), transparent 34%),
+        radial-gradient(circle at 72% 62%, rgba(240, 88, 200, 0.09), transparent 36%),
+        var(--spin-bg);
       color: var(--spin-ink);
       touch-action: none;
       -webkit-text-size-adjust: 100%;
@@ -178,6 +183,10 @@
                calc(env(safe-area-inset-bottom, 0px) + 1.5rem)
                calc(env(safe-area-inset-left, 0px) + 1.5rem);
       background-color: var(--spin-bg);
+      background:
+        radial-gradient(circle at 28% 38%, rgba(53, 221, 242, 0.10), transparent 34%),
+        radial-gradient(circle at 72% 62%, rgba(240, 88, 200, 0.09), transparent 36%),
+        var(--spin-bg);
       text-align: center;
     }
 
@@ -186,10 +195,38 @@
     }
 
     #spin-title {
-      font-size: clamp(1.25rem, 5vw, 2rem);
-      font-weight: 600;
-      letter-spacing: 0.02em;
+      font-size: clamp(1.45rem, 6vw, 2.35rem);
+      font-weight: 850;
+      letter-spacing: 0.08em;
       margin: 0;
+    }
+
+    #spin-signature {
+      width: min(56vw, 16rem);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.65rem;
+      margin-top: -0.5rem;
+    }
+
+    #spin-signature span {
+      height: 0.24rem;
+      border-radius: 999px;
+      background: var(--spin-accent);
+      box-shadow: 0 0 1rem rgba(53, 221, 242, 0.42);
+    }
+
+    #spin-signature span:last-child {
+      background: var(--spin-accent-two);
+      box-shadow: 0 0 1rem rgba(240, 88, 200, 0.38);
+    }
+
+    #spin-circuit {
+      margin-top: -0.55rem;
+      color: #c9eaf0;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
     }
 
     #spin-track {
@@ -205,7 +242,7 @@
       height: 100%;
       width: 0%;
       border-radius: 999px;
-      background-color: var(--spin-accent);
+      background: linear-gradient(90deg, var(--spin-accent), var(--spin-accent-two));
       transition: width 120ms linear;
     }
 
@@ -294,6 +331,8 @@
 
   <div id="spin-boot" role="status" aria-live="polite">
     <h1 id="spin-title">Project Spin</h1>
+    <div id="spin-signature" aria-hidden="true"><span></span><span></span></div>
+    <p id="spin-circuit">KINETIC CIRCUIT</p>
     <div id="spin-track" class="indeterminate"><span id="spin-fill"></span></div>
     <p class="spin-line" id="spin-status">Loading…</p>
     <p class="spin-line ar" id="spin-status-ar" dir="rtl" lang="ar">جارٍ التحميل…</p>
@@ -306,17 +345,17 @@
       or at the one Safari cached?*
 
       ⚠️ It is NOT a Godot placeholder. `scripts/deploy_playtest.ps1` substitutes
-      `CX-20260814.2` after the export, so the token survives `test_web_shell.gd`'s
+      `CX-20260814.3` after the export, so the token survives `test_web_shell.gd`'s
       placeholder check (which is about `$GODOT_*` and would fail on a deleted one)
       and a local build simply shows the token unchanged — which is itself
-      informative: a page reading "CX-20260814.2" was not deployed by the script.
+      informative: a page reading "CX-20260814.3" was not deployed by the script.
     -->
-    <p class="spin-line" id="spin-build">CODEX • CX-20260814.2</p>
+    <p class="spin-line" id="spin-build">CODEX • CX-20260814.3</p>
   </div>
 
   <script src="index.js"></script>
   <script>
-    const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","mainPack":"index.pck?v=CX-20260814.2","experimentalVK":false,"fileSizes":{"index.pck?v=CX-20260814.2":26383160,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+    const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","mainPack":"index.pck?v=CX-20260814.3","experimentalVK":false,"fileSizes":{"index.pck?v=CX-20260814.3":110020,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
     const GODOT_THREADS_ENABLED = false;
 
     (function () {
@@ -617,5 +656,4 @@
   </script>
 </body>
 </html>
-
 
