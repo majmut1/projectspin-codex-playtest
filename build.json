@@ -2,12 +2,12 @@
   "agent": "CODEX",
   "game": "RIFTBALL",
   "build": "RIFT-20260815.4",
-  "source_commit": "59afc0272f7b840e3f63177623abdee67abe10f2",
-  "source_tree": "ebcbb47626c4dded208bc8a027d3f4d0f6755099",
+  "source_commit": "a5666ac0c869d35b13c966f70d1c98d2f1441fbe",
+  "source_tree": "1fd950c7a93a4e5a1039b0c019c2daeabb0ff1ca",
   "physics": "drive",
   "camera": "broadcast",
   "runtime": "canvas2d-web-audio",
-  "release_bytes": 158537,
-  "combined_gzip_bytes": 37112,
+  "release_bytes": 158652,
+  "combined_gzip_bytes": 37147,
   "pck": null
 }

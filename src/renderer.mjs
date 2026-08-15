@@ -706,6 +706,7 @@ export class RiftRenderer {
   }
 
   #drawRider(game, node, owner, core, extraScale = 1) {
+    const context = this.context;
     const isPlayer = owner === "player";
     const color = isPlayer ? COLORS.amber : COLORS.violet;
     const hot = isPlayer ? COLORS.amberHot : COLORS.violetHot;
