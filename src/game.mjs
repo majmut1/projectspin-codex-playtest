@@ -10,7 +10,7 @@ import {
   RiftPhysics,
 } from "./physics.mjs";
 
-const BUILD_ID = "RIFT-20260815.1";
+const BUILD_ID = "RIFT-20260815.2";
 const BUILD_IDENTITY = `CODEX • RIFTBALL • ${BUILD_ID}`;
 const FIXED_STEP = 1 / 120;
 const WIN_SCORE = 3;

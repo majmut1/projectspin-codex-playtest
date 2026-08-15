@@ -1,8 +1,8 @@
 {
   "agent": "CODEX",
   "game": "RIFTBALL",
-  "build": "RIFT-20260815.1",
-  "source_commit": "1a100242bdb8fdcb3bc2fd9aeeec213ff24d9fae",
+  "build": "RIFT-20260815.2",
+  "source_commit": "06742b3c4be791758706c76415abc10eb42335d1",
   "physics": "tether",
   "runtime": "canvas2d-web-audio",
   "pck": null
