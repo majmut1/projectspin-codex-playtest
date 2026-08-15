@@ -139,6 +139,7 @@ export class RiftPhysics {
     this.duelSurge = 0;
     this.overtimeOpen = 0;
     this.surgeAnnounced = false;
+    this.breakAnnounced = false;
     this.lastTouch = null;
     this.sameSideChain = 0;
     this.rallyContacts = 0;
@@ -204,6 +205,7 @@ export class RiftPhysics {
     this.duelSurge = 0;
     this.overtimeOpen = 0;
     this.surgeAnnounced = false;
+    this.breakAnnounced = false;
     this.lastTouch = null;
     this.sameSideChain = 0;
     this.rallyContacts = 0;
@@ -272,11 +274,15 @@ export class RiftPhysics {
       this.surgeAnnounced = true;
       this.events.push({ type: "surge", strength: this.duelSurge });
     }
+    if (!this.breakAnnounced && this.overtimeOpen >= 0.05) {
+      this.breakAnnounced = true;
+      this.events.push({ type: "break", strength: this.overtimeOpen });
+    }
 
     const speedCap = this.config.baseSpeedCap + this.pressure * 260 + (this.matchPoint ? 26 : 0);
     this.#clampCoreSpeed(speedCap);
     let currentSpeed = length(this.core.vx, this.core.vy);
-    const minimumPace = this.roundTime > 7 ? 105 + longDuelPressure * 330 : 0;
+    const minimumPace = this.roundTime > 7 ? 105 + longDuelPressure * 330 + this.overtimeOpen * 240 : 0;
     if (minimumPace > 0 && currentSpeed < minimumPace) {
       if (currentSpeed > 12) this.lastMotionAngle = Math.atan2(this.core.vy, this.core.vx);
       const restoredSpeed = Math.min(minimumPace, currentSpeed + dt * 420);
@@ -497,7 +503,7 @@ export class RiftPhysics {
       this.events.push({ type: "rebound", surface: "right-wall", speed: length(this.core.vx, this.core.vy) });
     }
 
-    const liveGoalHalfWidth = ARENA.goalHalfWidth + this.duelSurge * 14 + this.overtimeOpen * 18;
+    const liveGoalHalfWidth = ARENA.goalHalfWidth + this.duelSurge * 14 + this.overtimeOpen * 26;
     const inMouth = Math.abs(this.core.x - REFERENCE_WIDTH / 2) <= liveGoalHalfWidth;
     if (inMouth && this.core.y <= ARENA.topReactorY) {
       this.#score("player");

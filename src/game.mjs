@@ -347,6 +347,11 @@ class RiftGame {
           { x: 195, y: ARENA.topReactorY, radius: 42, target: 116, life: 0.34, maxLife: 0.34, color: COLORS.violet, dashed: true },
           { x: 195, y: ARENA.bottomReactorY, radius: 42, target: 116, life: 0.34, maxLife: 0.34, color: COLORS.amber, dashed: true },
         );
+      } else if (event.type === "break") {
+        this.announce("RIFT BREAK", 0.84);
+        this.shake = Math.max(this.shake, 5.5);
+        this.flash = { alpha: 0.18, color: COLORS.bone };
+        this.shockwaves.push({ x: 195, y: 422, radius: 38, target: 208, life: 0.46, maxLife: 0.46, color: COLORS.bone, dashed: true });
       } else if (["intercept", "perfect", "clutch"].includes(event.type)) {
         this.spawnIntercept(event);
         this.shake = Math.max(this.shake, event.type === "clutch" ? 8 : event.type === "perfect" ? 4.5 : 2.2);
@@ -693,7 +698,7 @@ class RiftGame {
     context.save();
     context.translate(x, y);
     context.rotate(rotation);
-    context.scale(pulse * (1 + this.physics.duelSurge * 0.14 + this.physics.overtimeOpen * 0.18), pulse);
+    context.scale(pulse * (1 + this.physics.duelSurge * 0.14 + this.physics.overtimeOpen * 0.28), pulse);
     context.fillStyle = "#07080d";
     context.strokeStyle = "#454b58";
     context.lineWidth = 8;

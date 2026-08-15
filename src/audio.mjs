@@ -117,6 +117,10 @@ export class RiftAudio {
         this.#tone({ from: 84, to: 246, duration: 0.42, gain: 0.16, type: "sawtooth", filter: 680 });
         this.#whoosh(120, 760, 0.34, 0.10);
         break;
+      case "break":
+        this.#impact(78, 29, 0.36, 0.30, 0.24);
+        this.#tone({ from: 180, to: 880, duration: 0.34, gain: 0.13, type: "triangle", filter: 1200 });
+        break;
       default:
         break;
     }
