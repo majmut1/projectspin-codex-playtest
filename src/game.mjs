@@ -9,7 +9,7 @@ import {
   REFERENCE_WIDTH,
   RiftPhysics,
 } from "./physics.mjs";
-import { COLORS, RiftRenderer } from "./renderer.mjs";
+import { COLORS, RiftRenderer } from "./renderer.mjs?v=RIFT-20260815.4-r2";
 import { RiftTelemetry, telemetryHealth } from "./telemetry.mjs";
 
 const BUILD_ID = "RIFT-20260815.4";
