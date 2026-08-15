@@ -1,659 +1,80 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-
-  <!--
-    Project Spin — custom mobile web shell (B1-WEB02).
-
-    ⚠️ THIS FILE IS A GODOT EXPORT TEMPLATE, NOT A PAGE.
-
-    `export_presets.cfg` → `html/custom_html_shell` points at it, and the exporter
-    substitutes the `$GODOT_*` placeholders below on its way into
-    `build/web/index.html`. Every one of them must survive: a placeholder deleted
-    here is a build that boots into nothing, and `tests/unit/test_web_shell.gd`
-    fails on the absence of each.
-
-    It exists because the stock template answers none of the four questions iPhone
-    Safari asks:
-
-      1. `viewport-fit=cover` + `env(safe-area-inset-*)` — the ONLY source of the
-         notch, the Dynamic Island and the home indicator on the web. The engine
-         cannot see them: `DisplayServer.get_display_safe_area()` on this platform
-         reports the whole screen, so `PlaySpace` would build its frame from zero
-         insets and put the score under the island. `SpinShell.safeAreaDevicePx()`
-         is the hand-off, and `scripts/platform/web_shell.gd` is the only thing in
-         the project that reads it (`B1-ARC-001`).
-      2. Scroll, overscroll and zoom (`B1-PLAT-002`) — a drag that moves the paddle
-         must not move the page, and a double tap must not zoom it.
-      3. The bars (`B1-PLAT-003`, the browser half) — the page is fixed and
-         unscrollable, so Safari has nothing to scroll and no reason to animate its
-         chrome mid-rally, and the engine sizes the canvas from `window.innerWidth`
-         / `innerHeight`, which track the *dynamic* viewport on iOS.
-      4. A load a player can read (`B1-BOOT-001`) — a 37 MB download behind a black
-         screen is indistinguishable from a hang.
-
-    ⚠️ It decides NOTHING about threads. `false` is left as the
-    placeholder so `variant/thread_support` stays the preset's to set and
-    `B1-WEB03`'s to measure (`OA-WEBTHREADS-01`, D-0020). Writing `true` or `false`
-    in here would settle by accident a question the owner reserved for a real
-    device.
-  -->
-
-  <!--
-    ⚠️ `viewport-fit=cover` is what makes `env(safe-area-inset-*)` non-zero. Without
-    it Safari letterboxes the page inside the safe area and every inset reads 0 —
-    which looks exactly like a phone with no notch, and is the failure that would
-    have made the safe-area plumbing below silently useless.
-
-    `user-scalable=no` is advisory on iOS Safari and has been ignored there since
-    iOS 10; `touch-action: none` in the stylesheet is what actually stops the zoom.
-    Both are kept: the meta tag is what desktop and Android honour.
-  -->
-  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-
-  <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#0b0d11">
-  <meta name="mobile-web-app-capable" content="yes">
-  <!--
-    Added to the Home Screen the game runs without Safari's bars at all, which is
-    the best case for a portrait game. In an ordinary tab these two do nothing —
-    they are not a claim that the standalone path has been tested.
-  -->
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#05060a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
-  <title>Project Spin</title>
-
-  <style>
-    /*
-      The palette is `project.godot`'s `default_clear_color`, 0.043/0.051/0.067.
-      The page behind the canvas must be the colour the game clears to, or a
-      resize shows a black seam for a frame and the desktop surround reads as a
-      letterbox rather than as the room the court sits in (`B1-PLAT-006`).
-    */
-    :root {
-      --spin-bg: #0b0d11;
-      --spin-ink: #e8ecf3;
-      --spin-dim: #8c97a8;
-      --spin-line: #232b38;
-      --spin-accent: #35ddf2;
-      --spin-accent-two: #f058c8;
-      --spin-alarm: #ff8f6b;
-    }
-
-    /*
-      ⚠️ Six properties, five browsers' worth of default behaviour turned off, and
-      none of them is decoration:
-
-        `position: fixed` + `overflow: hidden`  — the document cannot scroll, so a
-          drag on the canvas moves the paddle and nothing else, and Safari never
-          collapses its bars mid-rally (`B1-PLAT-002`, `B1-PLAT-003`).
-        `overscroll-behavior: none`             — no rubber-band at the edges, and
-          no pull-to-refresh throwing away a match.
-        `touch-action: none`                    — no double-tap zoom, no pinch, no
-          pan. This is the one iOS actually obeys.
-        `user-select` / `touch-callout`         — a long press selects nothing and
-          raises no share sheet.
-        `-webkit-tap-highlight-color`           — no grey flash under every touch.
-    */
-    html, body {
-      margin: 0;
-      padding: 0;
-      border: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      overscroll-behavior: none;
-      background-color: var(--spin-bg);
-      background:
-        radial-gradient(circle at 28% 38%, rgba(53, 221, 242, 0.10), transparent 34%),
-        radial-gradient(circle at 72% 62%, rgba(240, 88, 200, 0.09), transparent 36%),
-        var(--spin-bg);
-      color: var(--spin-ink);
-      touch-action: none;
-      -webkit-text-size-adjust: 100%;
-      text-size-adjust: 100%;
-      font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans', Arial, sans-serif;
-    }
-
-    body {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      -webkit-user-select: none;
-      user-select: none;
-      -webkit-touch-callout: none;
-      -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
-    }
-
-    /*
-      Geometry is the ENGINE's. With `html/canvas_resize_policy=2` it sets
-      `position: absolute`, `top/left: 0` and the pixel size from
-      `window.innerWidth/innerHeight × devicePixelRatio` every frame. Anything here
-      that also set a size would fight it, and the loser changes between browsers.
-    */
-    #canvas {
-      display: block;
-      touch-action: none;
-      outline: none;
-    }
-
-    /*
-      The safe-area reading, and the reason it is an element rather than a constant.
-      `env()` is only legible to CSS, so the insets are painted onto a hidden box's
-      padding and read back with `getComputedStyle`. Zero-sized, hidden and inert,
-      so it can never intercept a touch meant for the court.
-    */
-    #spin-safe-area-probe {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 0;
-      height: 0;
-      visibility: hidden;
-      pointer-events: none;
-      padding-top: env(safe-area-inset-top, 0px);
-      padding-right: env(safe-area-inset-right, 0px);
-      padding-bottom: env(safe-area-inset-bottom, 0px);
-      padding-left: env(safe-area-inset-left, 0px);
-    }
-
-    /*
-      The boot screen (`B1-BOOT-001`). ⚠️ It contains NO IMAGE, deliberately: an
-      asset that fails to load is then incapable of producing the ambiguous black
-      screen the requirement is about. Everything here is text, a rule and a bar.
-    */
-    #spin-boot {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 10;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 1.1rem;
-      padding: calc(env(safe-area-inset-top, 0px) + 1.5rem)
-               calc(env(safe-area-inset-right, 0px) + 1.5rem)
-               calc(env(safe-area-inset-bottom, 0px) + 1.5rem)
-               calc(env(safe-area-inset-left, 0px) + 1.5rem);
-      background-color: var(--spin-bg);
-      background:
-        radial-gradient(circle at 28% 38%, rgba(53, 221, 242, 0.10), transparent 34%),
-        radial-gradient(circle at 72% 62%, rgba(240, 88, 200, 0.09), transparent 36%),
-        var(--spin-bg);
-      text-align: center;
-    }
-
-    #spin-boot[hidden] {
-      display: none;
-    }
-
-    #spin-title {
-      font-size: clamp(1.45rem, 6vw, 2.35rem);
-      font-weight: 850;
-      letter-spacing: 0.08em;
-      margin: 0;
-    }
-
-    #spin-signature {
-      width: min(56vw, 16rem);
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.65rem;
-      margin-top: -0.5rem;
-    }
-
-    #spin-signature span {
-      height: 0.24rem;
-      border-radius: 999px;
-      background: var(--spin-accent);
-      box-shadow: 0 0 1rem rgba(53, 221, 242, 0.42);
-    }
-
-    #spin-signature span:last-child {
-      background: var(--spin-accent-two);
-      box-shadow: 0 0 1rem rgba(240, 88, 200, 0.38);
-    }
-
-    #spin-circuit {
-      margin-top: -0.55rem;
-      color: #c9eaf0;
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.18em;
-    }
-
-    #spin-track {
-      width: min(70vw, 22rem);
-      height: 0.35rem;
-      border-radius: 999px;
-      background-color: var(--spin-line);
-      overflow: hidden;
-    }
-
-    #spin-fill {
-      display: block;
-      height: 100%;
-      width: 0%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, var(--spin-accent), var(--spin-accent-two));
-      transition: width 120ms linear;
-    }
-
-    /* No number to show yet — a bar that sweeps says "working", a bar at 0% does not. */
-    #spin-track.indeterminate #spin-fill {
-      width: 35%;
-      animation: spin-sweep 1.2s ease-in-out infinite;
-    }
-
-    @keyframes spin-sweep {
-      0% { transform: translateX(-100%); }
-      100% { transform: translateX(285%); }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      #spin-track.indeterminate #spin-fill {
-        animation: none;
-        width: 100%;
-        opacity: 0.45;
-      }
-      #spin-fill { transition: none; }
-    }
-
-    .spin-line {
-      margin: 0;
-      font-size: 0.95rem;
-      line-height: 1.45;
-      color: var(--spin-dim);
-      max-width: 34rem;
-    }
-
-    /* Persistent Codex build identity: readable in a screen recording while
-       remaining subordinate to the loading progress. */
-    #spin-build {
-      font-size: 0.82rem;
-      opacity: 0.82;
-      letter-spacing: 0.055em;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
-
-    .spin-line.ar {
-      font-size: 0.9rem;
-      opacity: 0.8;
-    }
-
-    #spin-hint[hidden], #spin-detail[hidden] {
-      display: none;
-    }
-
-    #spin-detail {
-      border: 1px solid var(--spin-line);
-      border-radius: 0.6rem;
-      padding: 0.85rem 1rem;
-      color: var(--spin-alarm);
-      font-size: 0.85rem;
-      line-height: 1.5;
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-width: min(90vw, 34rem);
-      max-height: 40vh;
-      overflow: auto;
-      text-align: left;
-      /* The one scrollable thing on the page, and it exists only when boot failed. */
-      touch-action: pan-y;
-      -webkit-user-select: text;
-      user-select: text;
-    }
-  </style>
-
-  <link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
-<link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
-
+  <meta name="format-detection" content="telephone=no">
+  <title>RIFTBALL</title>
+  <link rel="stylesheet" href="styles.css?v=RIFT-20260815.1">
 </head>
-
 <body>
-  <canvas id="canvas">
-    Your browser does not support the canvas tag.
-  </canvas>
+  <main id="app" aria-label="RIFTBALL gravity sport">
+    <canvas id="game-canvas" width="390" height="844" aria-label="RIFTBALL arena"></canvas>
 
-  <noscript>
-    <p class="spin-line">This game needs JavaScript.</p>
-    <p class="spin-line ar" dir="rtl" lang="ar">هذه اللعبة تحتاج إلى JavaScript.</p>
-  </noscript>
+    <section id="boot" class="screen boot-screen" aria-live="polite">
+      <div class="boot-core" aria-hidden="true"><i></i><i></i><i></i></div>
+      <p class="eyebrow">GRAVITY SPORT // 1V1</p>
+      <h1>RIFTBALL</h1>
+      <div class="boot-track"><span></span></div>
+      <p class="build-identity">CODEX • RIFTBALL • RIFT-20260815.1</p>
+    </section>
 
-  <div id="spin-safe-area-probe" aria-hidden="true"></div>
+    <section id="menu" class="screen menu-screen" hidden>
+      <div class="menu-spacer" aria-hidden="true"></div>
+      <div class="brand-lockup">
+        <div class="rift-emblem" aria-hidden="true"><b></b><i></i><em></em></div>
+        <p class="eyebrow">ONE CORE // TWO GRAVITIES</p>
+        <h1><span>RIFT</span><span>BALL</span></h1>
+        <p class="tagline">PULL. BEND. BREAK THE REACTOR.</p>
+      </div>
+      <div class="menu-actions">
+        <button id="play-button" class="primary-action" type="button">
+          <span>ENTER THE RIFT</span><b aria-hidden="true">›</b>
+        </button>
+        <p class="control-hint"><i aria-hidden="true"></i> DRAG YOUR GRAVITY ANCHOR</p>
+        <p class="build-identity">CODEX • RIFTBALL • RIFT-20260815.1</p>
+      </div>
+    </section>
 
-  <div id="spin-boot" role="status" aria-live="polite">
-    <h1 id="spin-title">Project Spin</h1>
-    <div id="spin-signature" aria-hidden="true"><span></span><span></span></div>
-    <p id="spin-circuit">KINETIC CIRCUIT</p>
-    <div id="spin-track" class="indeterminate"><span id="spin-fill"></span></div>
-    <p class="spin-line" id="spin-status">Loading…</p>
-    <p class="spin-line ar" id="spin-status-ar" dir="rtl" lang="ar">جارٍ التحميل…</p>
-    <p class="spin-line" id="spin-hint" hidden></p>
-    <pre id="spin-detail" hidden></pre>
+    <section id="hud" class="hud" hidden aria-label="Match HUD">
+      <div class="score-rack">
+        <div class="score-side player-score-side">
+          <span class="identity">YOU</span>
+          <div id="player-pips" class="reactor-pips" aria-label="Player score"></div>
+        </div>
+        <div class="score-numerals"><strong id="player-score">0</strong><i></i><strong id="bot-score">0</strong></div>
+        <div class="score-side bot-score-side">
+          <span class="identity">WRAITH</span>
+          <div id="bot-pips" class="reactor-pips" aria-label="Opponent score"></div>
+        </div>
+      </div>
+      <div id="status" class="status-call" aria-live="polite"></div>
+      <div id="duel-meter" class="duel-meter"><span></span></div>
+      <button id="sound-button" class="sound-button" type="button" aria-label="Toggle sound"><span></span></button>
+      <p class="game-build">CODEX • RIFTBALL • RIFT-20260815.1</p>
+    </section>
 
-    <!--
-      The build identifier, and it exists to answer ONE question the owner cannot
-      otherwise answer from a phone: *am I looking at the build you just deployed,
-      or at the one Safari cached?*
+    <section id="results" class="screen result-screen" hidden>
+      <div class="result-card">
+        <p class="eyebrow">REACTOR MATCH COMPLETE</p>
+        <h2 id="result-title">VICTORY</h2>
+        <p id="result-score" class="result-score">3 — 0</p>
+        <div id="result-stats" class="result-stats"></div>
+        <button id="replay-button" class="primary-action" type="button"><span>PLAY AGAIN</span><b aria-hidden="true">↻</b></button>
+        <button id="home-button" class="secondary-action" type="button">HOME</button>
+        <p class="build-identity">CODEX • RIFTBALL • RIFT-20260815.1</p>
+      </div>
+    </section>
 
-      ⚠️ It is NOT a Godot placeholder. `scripts/deploy_playtest.ps1` substitutes
-      `CX-20260814.3` after the export, so the token survives `test_web_shell.gd`'s
-      placeholder check (which is about `$GODOT_*` and would fail on a deleted one)
-      and a local build simply shows the token unchanged — which is itself
-      informative: a page reading "CX-20260814.3" was not deployed by the script.
-    -->
-    <p class="spin-line" id="spin-build">CODEX • CX-20260814.3</p>
-  </div>
+    <div id="rotate-warning" class="rotate-warning" hidden>
+      <div aria-hidden="true">↻</div>
+      <p>PORTRAIT PLAY</p>
+    </div>
+  </main>
 
-  <script src="index.js"></script>
-  <script>
-    const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","mainPack":"index.pck?v=CX-20260814.3","experimentalVK":false,"fileSizes":{"index.pck?v=CX-20260814.3":110020,"index.wasm":39513091},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
-    const GODOT_THREADS_ENABLED = false;
-
-    (function () {
-      'use strict';
-
-      const canvas = document.getElementById('canvas');
-      const boot = document.getElementById('spin-boot');
-      const track = document.getElementById('spin-track');
-      const fill = document.getElementById('spin-fill');
-      const status = document.getElementById('spin-status');
-      const statusAr = document.getElementById('spin-status-ar');
-      const hint = document.getElementById('spin-hint');
-      const detail = document.getElementById('spin-detail');
-      const probe = document.getElementById('spin-safe-area-probe');
-
-      /** How long a silent download is allowed to look like a hang. */
-      const SLOW_BOOT_MS = 20000;
-
-      let state = 'loading';
-      let sawProgress = false;
-
-      // ----------------------------------------------------------- safe area
-      //
-      // ⚠️ The insets are handed over in DEVICE pixels, because that is the space
-      // `DisplayServer.window_get_size()` answers in and `PlaySpace.safe_rect_for`
-      // divides by. Handing over CSS pixels would under-report a notch by the
-      // pixel ratio — a factor of three on the acceptance device, and a mistake
-      // that reads as "the inset was applied" in every assertion.
-
-      function cssInset(property) {
-        if (!probe) {
-          return 0;
-        }
-        const value = Number.parseFloat(
-          window.getComputedStyle(probe).getPropertyValue(property)
-        );
-        return Number.isFinite(value) && value > 0 ? value : 0;
-      }
-
-      function safeAreaCssPx() {
-        return {
-          left: cssInset('padding-left'),
-          top: cssInset('padding-top'),
-          right: cssInset('padding-right'),
-          bottom: cssInset('padding-bottom'),
-        };
-      }
-
-      /**
-       * CSS pixels → the canvas's own pixels.
-       *
-       * Measured off the canvas rather than taken from `devicePixelRatio`, because
-       * the engine applies the ratio only when `display/window/dpi/allow_hidpi` is
-       * on. Reading the ratio the engine actually used cannot disagree with it;
-       * assuming one can, on exactly the devices where the insets are non-zero.
-       */
-      function canvasScale() {
-        if (canvas && canvas.width > 0 && canvas.clientWidth > 0) {
-          return canvas.width / canvas.clientWidth;
-        }
-        return window.devicePixelRatio || 1;
-      }
-
-      /** `"left,top,right,bottom"` in device pixels — the whole engine-facing API. */
-      function safeAreaDevicePx() {
-        const scale = canvasScale();
-        const css = safeAreaCssPx();
-        const device = (value) => Math.max(0, Math.round(value * scale));
-        return [
-          device(css.left),
-          device(css.top),
-          device(css.right),
-          device(css.bottom),
-        ].join(',');
-      }
-
-      // ------------------------------------------------------------- boot UI
-
-      function setLines(english, arabic) {
-        status.textContent = english;
-        statusAr.textContent = arabic;
-      }
-
-      function setProgress(current, total) {
-        sawProgress = true;
-        if (current > 0 && total > 0) {
-          track.classList.remove('indeterminate');
-          const percent = Math.max(0, Math.min(100, (current / total) * 100));
-          fill.style.width = percent.toFixed(1) + '%';
-          setLines(
-            'Loading… ' + Math.floor(percent) + '%',
-            'جارٍ التحميل… ' + Math.floor(percent) + '٪'
-          );
-          return;
-        }
-        track.classList.add('indeterminate');
-      }
-
-      function showDetail(text) {
-        detail.textContent = text;
-        detail.hidden = false;
-      }
-
-      /**
-       * The browser cannot run this build. Not an error in the build — a fact about
-       * the browser — so it is worded as one and it names what is missing.
-       *
-       * ⚠️ Exported on `SpinShell` so a test can render it. The features it lists
-       * are the engine's own; nothing here decides whether threads are required.
-       */
-      function showBlocked(features) {
-        state = 'blocked';
-        boot.hidden = false;
-        track.hidden = true;
-        setLines(
-          'This browser cannot run Project Spin.',
-          'هذا المتصفح لا يستطيع تشغيل Project Spin.'
-        );
-        hint.textContent =
-          'Try the newest Safari or Chrome, and make sure the page is served over ' +
-          'HTTPS. — جرّب أحدث إصدار من Safari أو Chrome، وتأكد أن الصفحة تُقدَّم عبر HTTPS.';
-        hint.hidden = false;
-        showDetail('Missing: ' + (features || []).join('\n         '));
-      }
-
-      /** Boot failed. The message is shown rather than logged — a black screen is not a report. */
-      function showFatal(error) {
-        state = 'failed';
-        boot.hidden = false;
-        track.hidden = true;
-        setLines(
-          'Project Spin could not start.',
-          'تعذّر بدء تشغيل Project Spin.'
-        );
-        hint.textContent = 'Reload the page to try again. — أعد تحميل الصفحة للمحاولة مرة أخرى.';
-        hint.hidden = false;
-        let text;
-        if (error instanceof Error) {
-          text = error.message;
-        } else if (typeof error === 'string') {
-          text = error;
-        } else {
-          text = 'An unknown error occurred.';
-        }
-        showDetail(text);
-        console.error(error);
-      }
-
-      /**
-       * Boot succeeded — get out of the way.
-       *
-       * ⚠️ Hidden, not removed, and the stock template removes it. Removal exists
-       * there to free a full-screen splash image; this screen has none, so it buys
-       * nothing — and it costs the ability to report a failure that happens AFTER
-       * boot, which is the class of failure a player is least equipped to explain.
-       * `#spin-boot[hidden]` is `display: none`, so a hidden overlay cannot
-       * intercept a touch meant for the court.
-       */
-      function hideBoot() {
-        state = 'running';
-        boot.hidden = true;
-      }
-
-      // A long silence is the state B1-BOOT-001 is really about: the build is 37 MB
-      // and a slow connection looks exactly like a hang. Say so, and keep waiting.
-      window.setTimeout(function () {
-        if (state !== 'loading') {
-          return;
-        }
-        hint.textContent = sawProgress
-          ? 'Still loading — this build is large. — ما زال التحميل جاريًا، حجم البناء كبير.'
-          : 'Still connecting — check the network. — ما زال الاتصال جاريًا، تحقّق من الشبكة.';
-        hint.hidden = false;
-      }, SLOW_BOOT_MS);
-
-      // -------------------------------------------- scroll, zoom, overscroll
-      //
-      // The stylesheet does most of this. These four listeners cover what CSS
-      // cannot: Safari's own pinch gesture events, the double-tap that survives
-      // `touch-action` on older iOS, a trackpad pinch on desktop, and the
-      // long-press menu. `{ passive: false }` on every one — a passive listener
-      // cannot call `preventDefault`, and the browser assumes passive by default
-      // for these on touch devices.
-      //
-      // ⚠️ All of them sit on `document`, so Godot's own canvas listeners run
-      // first and still see every event. Preventing the default suppresses the
-      // BROWSER's reaction, never the engine's.
-
-      function block(event) {
-        event.preventDefault();
-      }
-
-      ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (name) {
-        document.addEventListener(name, block, { passive: false });
-      });
-
-      document.addEventListener('dblclick', block, { passive: false });
-      document.addEventListener('contextmenu', block, { passive: false });
-
-      document.addEventListener('touchmove', function (event) {
-        // One finger belongs to the paddle; two are a pinch, and nothing in this
-        // game needs two.
-        if (event.touches && event.touches.length > 1) {
-          event.preventDefault();
-        }
-      }, { passive: false });
-
-      document.addEventListener('wheel', function (event) {
-        // ctrl+wheel is how a trackpad pinch and a mouse zoom both arrive.
-        if (event.ctrlKey) {
-          event.preventDefault();
-        }
-      }, { passive: false });
-
-      // Belt and braces for the one path CSS cannot cover: something else scrolls
-      // the document (an autofocus, a hash link, a browser restoring a position).
-      if ('scrollRestoration' in window.history) {
-        window.history.scrollRestoration = 'manual';
-      }
-      window.addEventListener('scroll', function () {
-        if (window.scrollX !== 0 || window.scrollY !== 0) {
-          window.scrollTo(0, 0);
-        }
-      }, { passive: true });
-
-      // ------------------------------------------------------- the engine seam
-      //
-      // ⚠️ `SpinShell` is the ENTIRE surface between the browser page and the
-      // game (`B1-ARC-001`). `scripts/platform/web_shell.gd` is the only thing in
-      // the project that calls it, and a test fails if a second file does. Keep it
-      // small, keep it versioned, and keep the return types primitive — the
-      // GDScript bridge carries strings and numbers reliably and objects poorly.
-
-      window.SpinShell = {
-        version: 1,
-        safeAreaCssPx: safeAreaCssPx,
-        safeAreaDevicePx: safeAreaDevicePx,
-        canvasScale: canvasScale,
-        viewportCssPx: function () {
-          return { width: window.innerWidth, height: window.innerHeight };
-        },
-        state: function () {
-          return state;
-        },
-        // The real fallback renderers, exported so they can be exercised rather
-        // than reviewed. Calling them does not fake a failure; it draws one.
-        showBlocked: showBlocked,
-        showFatal: showFatal,
-      };
-
-      // ----------------------------------------------------------- start Godot
-
-      const engine = new Engine(Object.assign({}, GODOT_CONFIG, { canvas: canvas }));
-
-      const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
-
-      if (missing.length !== 0) {
-        // Kept from the stock template: with the PWA option on, installing the
-        // service worker can supply the cross-origin isolation headers the host is
-        // not sending, so one reload is worth attempting before giving up.
-        // `progressive_web_app/enabled` is currently false, so this branch does not
-        // run — it stays because the alternative is discovering it was dropped on
-        // the day the option is turned on.
-        if (GODOT_CONFIG['serviceWorker']
-            && GODOT_CONFIG['ensureCrossOriginIsolationHeaders']
-            && 'serviceWorker' in navigator) {
-          let registration;
-          try {
-            registration = navigator.serviceWorker.getRegistration();
-          } catch (error) {
-            registration = Promise.reject(new Error('Service worker registration failed.'));
-          }
-          Promise.race([
-            registration.then(function (existing) {
-              if (existing != null) {
-                return Promise.reject(new Error('Service worker already exists.'));
-              }
-              return existing;
-            }).then(function () {
-              return engine.installServiceWorker();
-            }),
-            new Promise(function (resolve) {
-              window.setTimeout(resolve, 2000);
-            }),
-          ]).then(function () {
-            window.location.reload();
-          }).catch(function () {
-            showBlocked(missing);
-          });
-        } else {
-          showBlocked(missing);
-        }
-      } else {
-        setProgress(0, 0);
-        engine.startGame({ onProgress: setProgress }).then(hideBoot, showFatal);
-      }
-    }());
-  </script>
+  <script type="module" src="src/game.mjs?v=RIFT-20260815.1"></script>
 </body>
 </html>
-
