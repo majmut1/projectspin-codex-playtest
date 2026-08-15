@@ -1,7 +1,7 @@
 {
   "name": "RIFTBALL",
   "short_name": "RIFTBALL",
-  "description": "Landscape two-thumb zero-g duel sport.",
+  "description": "Landscape two-thumb zero-g combat sport with release-to-fire Powers.",
   "start_url": "./",
   "display": "standalone",
   "orientation": "landscape",

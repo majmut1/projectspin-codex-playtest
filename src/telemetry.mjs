@@ -1,4 +1,4 @@
-const STORAGE_KEY = "riftball-owner-telemetry-v5";
+const STORAGE_KEY = "riftball-owner-telemetry-v6";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -65,7 +65,8 @@ export class RiftTelemetry {
       saves: 0,
       clutchSaves: 0,
       strikes: 0,
-      powerHits: { rush: 0, bend: 0, brake: 0, burst: 0 },
+      powerHits: { rush: 0, bend: 0, grip: 0, pulse: 0 },
+      strikeQuality: { normal: 0, clean: 0, perfect: 0, power: 0 },
       strikeWhiffs: 0,
       rebounds: 0,
       finRebounds: 0,
@@ -79,9 +80,12 @@ export class RiftTelemetry {
         joystickEngagements: 0,
         actionPresses: 0,
         radialOpens: 0,
+        radialChanges: 0,
         centerReleases: 0,
+        tapStrikes: 0,
         actionCancels: 0,
-        powerArms: { rush: 0, bend: 0, brake: 0, burst: 0 },
+        powerFires: { rush: 0, bend: 0, grip: 0, pulse: 0 },
+        powerDenied: { rush: 0, bend: 0, grip: 0, pulse: 0 },
       },
       frame: null,
     };
@@ -108,9 +112,12 @@ export class RiftTelemetry {
     if (type === "joystick-start") controls.joystickEngagements += 1;
     else if (type === "action-press") controls.actionPresses += 1;
     else if (type === "radial-open") controls.radialOpens += 1;
+    else if (type === "radial-change") controls.radialChanges += 1;
     else if (type === "center-release") controls.centerReleases += 1;
+    else if (type === "tap-strike") controls.tapStrikes += 1;
     else if (type === "action-cancel") controls.actionCancels += 1;
-    else if (type === "power-arm" && power in controls.powerArms) controls.powerArms[power] += 1;
+    else if (type === "power-fire" && power in controls.powerFires) controls.powerFires[power] += 1;
+    else if (type === "power-denied" && power in controls.powerDenied) controls.powerDenied[power] += 1;
   }
 
   sample(dt, physics) {
@@ -159,6 +166,7 @@ export class RiftTelemetry {
     } else if (event.type === "strike" && event.owner === "player") {
       this.current.strikes += 1;
       if (event.power in this.current.powerHits) this.current.powerHits[event.power] += 1;
+      if (event.quality in this.current.strikeQuality) this.current.strikeQuality[event.quality] += 1;
     } else if (event.type === "strike-whiff" && event.owner === "player") {
       this.current.strikeWhiffs += 1;
     } else if (event.type === "rebound") {

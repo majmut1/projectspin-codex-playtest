@@ -1,8 +1,8 @@
 export const POWER_DIRECTIONS = Object.freeze({
   UP: "rush",
   RIGHT: "bend",
-  DOWN: "brake",
-  LEFT: "burst",
+  DOWN: "grip",
+  LEFT: "pulse",
 });
 
 export const POWER_DEFINITIONS = Object.freeze({
@@ -13,8 +13,9 @@ export const POWER_DEFINITIONS = Object.freeze({
     direction: "up",
     icon: "»",
     color: "#ff6b35",
-    cost: 36,
-    description: "MAX SPEED",
+    cost: 48,
+    description: "FINISH",
+    role: "offensive-finisher",
   }),
   bend: Object.freeze({
     id: "bend",
@@ -23,28 +24,31 @@ export const POWER_DEFINITIONS = Object.freeze({
     direction: "right",
     icon: "↷",
     color: "#67f5e8",
-    cost: 30,
-    description: "CURVE SHOT",
+    cost: 34,
+    description: "ANGLE",
+    role: "angle-tool",
   }),
-  brake: Object.freeze({
-    id: "brake",
-    label: "BRAKE",
-    shortLabel: "BRAKE",
+  grip: Object.freeze({
+    id: "grip",
+    label: "GRIP",
+    shortLabel: "GRIP",
     direction: "down",
-    icon: "◇",
+    icon: "⌁",
     color: "#6aa8ff",
-    cost: 26,
-    description: "KILL SPEED",
+    cost: 30,
+    description: "CAPTURE",
+    role: "control-possession",
   }),
-  burst: Object.freeze({
-    id: "burst",
-    label: "BURST",
-    shortLabel: "BURST",
+  pulse: Object.freeze({
+    id: "pulse",
+    label: "PULSE",
+    shortLabel: "PULSE",
     direction: "left",
-    icon: "◎",
+    icon: "◉",
     color: "#e66cff",
     cost: 40,
-    description: "WIDE PUSH",
+    description: "COUNTER",
+    role: "defensive-displacement",
   }),
 });
 
@@ -60,7 +64,7 @@ export function radialPowerFromVector(dx, dy, deadZone = 34) {
 }
 
 export class DualThumbInput {
-  constructor({ joystickRadius = 46, radialDeadZone = 34, holdDelay = 112 } = {}) {
+  constructor({ joystickRadius = 50, radialDeadZone = 46, holdDelay = 108 } = {}) {
     this.joystickRadius = joystickRadius;
     this.radialDeadZone = radialDeadZone;
     this.holdDelay = holdDelay;
@@ -154,9 +158,9 @@ export class DualThumbInput {
     const elapsed = now - this.action.startedAt;
     const result = this.action.radialOpen
       ? this.action.selectedPower
-        ? { type: "power", power: this.action.selectedPower, elapsed }
-        : { type: "center", power: null, elapsed }
-      : { type: "tap", power: null, elapsed };
+        ? { type: "power-fire", power: this.action.selectedPower, elapsed }
+        : { type: "strike", power: null, elapsed, fromCenter: true }
+      : { type: "strike", power: null, elapsed, fromCenter: false };
     this.action = this.#freshAction();
     return result;
   }

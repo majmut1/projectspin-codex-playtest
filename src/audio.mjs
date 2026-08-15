@@ -25,28 +25,146 @@ export class RiftAudio {
     this.beatIndex = 0;
     this.unlocked = false;
     this.enabled = true;
+    this.primed = false;
+    this.compressor = null;
+    this.health = {
+      unlockAttempts: 0,
+      resumeAttempts: 0,
+      resumeSuccesses: 0,
+      recoveries: 0,
+      stateChanges: [],
+      audioSessionSupported: false,
+      audioSessionType: null,
+      primePulses: 0,
+      scheduledVoices: 0,
+      scheduledNoise: 0,
+      lastRecoveryReason: null,
+      lastError: null,
+    };
   }
 
   async unlock() {
     if (!this.enabled) return false;
+    this.health.unlockAttempts += 1;
+    this.#configureAudioSession();
     if (!this.context) {
       const Context = AUDIO_CONTEXT();
-      if (!Context) return false;
-      this.context = new Context({ latencyHint: "interactive" });
-      this.master = this.context.createGain();
-      this.master.gain.value = 0.72;
-      this.master.connect(this.context.destination);
-      this.#buildContinuousVoices();
+      if (!Context) {
+        this.health.lastError = "AudioContext unavailable";
+        return false;
+      }
+      try {
+        this.context = new Context({ latencyHint: "interactive" });
+        this.context.addEventListener?.("statechange", () => this.#recordContextState());
+        this.master = this.context.createGain();
+        this.master.gain.value = 0.82;
+        this.compressor = this.context.createDynamicsCompressor?.() || null;
+        if (this.compressor) {
+          this.compressor.threshold.value = -12;
+          this.compressor.knee.value = 18;
+          this.compressor.ratio.value = 4;
+          this.compressor.attack.value = 0.004;
+          this.compressor.release.value = 0.18;
+          this.master.connect(this.compressor).connect(this.context.destination);
+        } else {
+          this.master.connect(this.context.destination);
+        }
+        this.#buildContinuousVoices();
+        this.#recordContextState();
+      } catch (error) {
+        this.health.lastError = String(error?.message || error);
+        return false;
+      }
     }
-    if (this.context.state === "suspended") await this.context.resume();
+    if (this.context.state !== "running" && this.context.state !== "closed") {
+      this.health.resumeAttempts += 1;
+      try {
+        await this.context.resume();
+      } catch (error) {
+        this.health.lastError = String(error?.message || error);
+      }
+    }
     this.unlocked = this.context.state === "running";
+    if (this.unlocked) {
+      this.health.resumeSuccesses += 1;
+      this.#primeOutput();
+    }
+    this.#recordContextState();
     return this.unlocked;
+  }
+
+  async recover(reason = "interaction") {
+    this.health.recoveries += 1;
+    this.health.lastRecoveryReason = reason;
+    this.#configureAudioSession();
+    if (!this.enabled || !this.context || this.context.state === "closed") return false;
+    if (this.context.state !== "running") {
+      this.health.resumeAttempts += 1;
+      try {
+        await this.context.resume();
+      } catch (error) {
+        this.health.lastError = String(error?.message || error);
+      }
+    }
+    this.unlocked = this.context.state === "running";
+    if (this.unlocked) this.health.resumeSuccesses += 1;
+    this.#recordContextState();
+    return this.unlocked;
+  }
+
+  #configureAudioSession() {
+    try {
+      const session = globalThis.navigator?.audioSession;
+      this.health.audioSessionSupported = Boolean(session);
+      if (!session) return;
+      if (session.type !== "playback") session.type = "playback";
+      this.health.audioSessionType = session.type;
+    } catch (error) {
+      this.health.lastError = String(error?.message || error);
+    }
+  }
+
+  #recordContextState() {
+    if (!this.context) return;
+    const state = this.context.state;
+    this.unlocked = state === "running";
+    const previous = this.health.stateChanges.at(-1);
+    if (previous?.state === state) return;
+    this.health.stateChanges.push({ state, at: Date.now() });
+    this.health.stateChanges = this.health.stateChanges.slice(-12);
+  }
+
+  #primeOutput() {
+    if (this.primed || !this.context || !this.master) return;
+    this.primed = true;
+    this.health.primePulses += 1;
+    const now = this.context.currentTime;
+    const oscillator = this.context.createOscillator();
+    const gain = this.context.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(46, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.006, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+    oscillator.connect(gain).connect(this.master);
+    oscillator.start(now);
+    oscillator.stop(now + 0.065);
+  }
+
+  diagnostics() {
+    return {
+      enabled: this.enabled,
+      unlocked: this.unlocked,
+      contextState: this.context?.state || "uninitialized",
+      masterGain: this.master?.gain?.value ?? 0,
+      ...structuredClone(this.health),
+    };
   }
 
   setEnabled(value) {
     this.enabled = Boolean(value);
     if (this.master && this.context) {
-      this.master.gain.setTargetAtTime(this.enabled ? 0.72 : 0, this.context.currentTime, 0.025);
+      this.master.gain.setTargetAtTime(this.enabled ? 0.82 : 0, this.context.currentTime, 0.025);
     }
   }
 
@@ -148,7 +266,7 @@ export class RiftAudio {
     phase = "DUEL",
     active = true,
   } = {}) {
-    if (!this.unlocked || !this.enabled) return;
+    if (!this.unlocked || !this.enabled || this.context?.state !== "running") return;
     const now = this.context.currentTime;
     const normalizedSpeed = clamp(speed / 720, 0, 1);
     const field = clamp(Math.max(playerField, botField), 0, 1);
@@ -199,7 +317,7 @@ export class RiftAudio {
         this.#tone({ from: 96, to: 154, duration: 0.055, gain: 0.075, type: "triangle", filter: 720 });
         break;
       case "strike":
-        this.#strike(event.power || "normal", event.sweetSpot || 0);
+        this.#strike(event.power || "normal", event.quality || (event.sweetSpot ? "clean" : "normal"));
         break;
       case "strike-whiff":
         this.#whoosh(176, 510, 0.105, 0.050);
@@ -220,6 +338,10 @@ export class RiftAudio {
         break;
       case "sling":
         this.#whoosh(180, 1120, 0.25, 0.14);
+        break;
+      case "grip-release":
+        this.#tone({ from: 132, to: 690, duration: 0.20, gain: 0.13, type: "triangle", filter: 1180 });
+        this.#whoosh(180, 980, 0.17, 0.09);
         break;
       case "rebound":
         this.#impact(176, 96, 0.085, 0.15, 0.10);
@@ -255,15 +377,25 @@ export class RiftAudio {
     this.#tone({ from: 492, to: 656, duration: 0.075, gain: 0.032, type: "sine", delay: 0.025 });
   }
 
-  powerArm(power = "rush") {
+  radialSelect(power = null) {
+    if (!power) {
+      this.#tone({ from: 236, to: 178, duration: 0.045, gain: 0.032, type: "triangle", filter: 680 });
+      return;
+    }
+    const tones = { rush: 620, bend: 820, grip: 340, pulse: 470 };
+    const frequency = tones[power] || 520;
+    this.#tone({ from: frequency * 0.82, to: frequency, duration: 0.048, gain: 0.048, type: "sine", filter: 1320 });
+  }
+
+  powerRelease(power = "rush") {
     const voices = {
       rush: [220, 760, "sawtooth", 1180],
       bend: [420, 1120, "sine", 1540],
-      brake: [260, 72, "triangle", 620],
-      burst: [136, 520, "square", 940],
+      grip: [520, 118, "triangle", 720],
+      pulse: [136, 620, "square", 1040],
     };
     const [from, to, type, filter] = voices[power] || voices.rush;
-    this.#tone({ from, to, duration: 0.15, gain: 0.090, type, filter });
+    this.#tone({ from, to, duration: 0.12, gain: 0.078, type, filter });
   }
 
   denied() {
@@ -322,8 +454,8 @@ export class RiftAudio {
     this.crowdResponse(victory ? 1 : 0.32);
   }
 
-  #strike(power, sweetSpot) {
-    const accent = 1 + clamp(sweetSpot, 0, 1) * 0.22;
+  #strike(power, quality = "normal") {
+    const accent = { normal: 1, clean: 1.20, perfect: 1.42, power: 1.34 }[quality] || 1;
     if (power === "rush") {
       this.#impact(190, 34, 0.17, 0.30 * accent, 0.24);
       this.#whoosh(250, 1760, 0.21, 0.15);
@@ -335,23 +467,25 @@ export class RiftAudio {
       this.#whoosh(620, 1040, 0.24, 0.075);
       return;
     }
-    if (power === "brake") {
+    if (power === "grip") {
       this.#impact(112, 31, 0.23, 0.31 * accent, 0.22);
-      this.#tone({ from: 310, to: 54, duration: 0.20, gain: 0.13, type: "triangle", filter: 610 });
+      this.#tone({ from: 440, to: 66, duration: 0.24, gain: 0.14, type: "triangle", filter: 680 });
       return;
     }
-    if (power === "burst") {
+    if (power === "pulse") {
       this.#impact(148, 38, 0.22, 0.29 * accent, 0.27);
-      this.#noiseBurst(0.18, 0.16, 1250, "bandpass");
-      this.#tone({ from: 164, to: 690, duration: 0.16, gain: 0.115, type: "square", filter: 1050 });
+      this.#noiseBurst(0.21, 0.18, 1250, "bandpass");
+      this.#tone({ from: 124, to: 760, duration: 0.18, gain: 0.13, type: "square", filter: 1120 });
       return;
     }
-    this.#impact(164, 43, 0.145, 0.26 * accent, 0.18);
-    this.#whoosh(240, 920, 0.14, 0.095);
+    this.#impact(178, 38, 0.17, 0.34 * accent, 0.23 * accent);
+    this.#whoosh(220, 1080 + (quality === "perfect" ? 380 : 0), 0.16, 0.12 * accent);
+    if (quality === "perfect") this.#tone({ from: 760, to: 1680, duration: 0.13, gain: 0.14, type: "triangle", filter: 1900 });
   }
 
   #tone({ from, to, duration, gain, type = "sine", delay = 0, filter = 1600 }) {
     if (!this.context || !this.master) return;
+    this.health.scheduledVoices += 1;
     const start = this.context.currentTime + delay;
     const oscillator = this.context.createOscillator();
     const voiceGain = this.context.createGain();
@@ -383,6 +517,7 @@ export class RiftAudio {
 
   #noiseBurst(duration, gain, frequency, type = "lowpass") {
     if (!this.context || !this.master) return;
+    this.health.scheduledNoise += 1;
     const sampleRate = this.context.sampleRate;
     const buffer = this.context.createBuffer(1, Math.max(1, Math.floor(sampleRate * duration)), sampleRate);
     const data = buffer.getChannelData(0);

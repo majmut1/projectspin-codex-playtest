@@ -12,10 +12,10 @@ import {
   WORLD_WIDTH,
   RiftPhysics,
 } from "./physics.mjs";
-import { COLORS, RiftRenderer } from "./renderer.mjs?v=RIFT-20260815.5-r1";
+import { COLORS, RiftRenderer } from "./renderer.mjs?v=RIFT-20260815.6-r1";
 import { RiftTelemetry, telemetryHealth } from "./telemetry.mjs";
 
-const BUILD_ID = "RIFT-20260815.5";
+const BUILD_ID = "RIFT-20260815.6";
 const BUILD_IDENTITY = `CODEX • RIFTBALL • ${BUILD_ID}`;
 const FIXED_STEP = 1 / 120;
 const WIN_SCORE = 3;
@@ -48,7 +48,7 @@ const actionCluster = document.getElementById("action-cluster");
 const actionButton = document.getElementById("action-button");
 const actionIcon = document.getElementById("action-icon");
 const actionLabel = document.getElementById("action-label");
-const armedPowerReadout = document.getElementById("armed-power");
+const fluxReadout = document.getElementById("flux-readout");
 const fluxValue = document.getElementById("flux-value");
 const powerOptions = [...document.querySelectorAll(".power-option")];
 const playerScoreLabel = document.getElementById("player-score");
@@ -98,13 +98,12 @@ class RiftGame {
     this.camera = new CameraRig(this.cameraMode);
     this.renderer = new RiftRenderer(canvas, context, this.camera);
     this.telemetry = new RiftTelemetry({ build: BUILD_ID, physics: this.physicsMode, camera: this.cameraMode });
-    this.input = new DualThumbInput({ joystickRadius: 46, radialDeadZone: 34, holdDelay: 112 });
+    this.input = new DualThumbInput({ joystickRadius: 50, radialDeadZone: 46, holdDelay: 108 });
 
     this.state = GAME_STATES.MENU;
     this.scores = { player: 0, bot: 0 };
     this.stats = this.#freshStats();
     this.flux = { player: 100, bot: 100 };
-    this.armedPower = { player: null, bot: null };
     this.lastFluxDisplay = -1;
     this.matchStartedAt = 0;
     this.matchIntro = 0;
@@ -120,6 +119,7 @@ class RiftGame {
     this.soundEnabled = true;
     this.statusExpires = 0;
     this.hitStop = 0;
+    this.coreTrailBoost = 0;
     this.trail = [];
     this.trailSampleTimer = 0;
     this.particles = [];
@@ -137,6 +137,7 @@ class RiftGame {
     this.lastBotState = BOT_STATES.PROBE;
     this.devicePixelRatio = 1;
     this.radialTimer = null;
+    this.radialSelection = null;
     this.riderFx = {
       player: { recoil: 0, flash: 0, celebrate: 0, power: 0 },
       bot: { recoil: 0, flash: 0, celebrate: 0, power: 0 },
@@ -183,8 +184,10 @@ class RiftGame {
     addEventListener("resize", () => this.resize(), { passive: true });
     addEventListener("orientationchange", () => this.resize(), { passive: true });
     addEventListener("blur", () => this.#cancelInput(), { passive: true });
+    addEventListener("focus", () => this.audio.recover?.("focus"), { passive: true });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) this.#cancelInput();
+      else this.audio.recover?.("visible");
     });
 
     movePad.addEventListener("pointerdown", (event) => {
@@ -237,8 +240,13 @@ class RiftGame {
       event.preventDefault();
       const rect = actionButton.getBoundingClientRect();
       const wasOpen = this.input.action.radialOpen;
+      const previousPower = this.input.action.selectedPower;
       this.input.updateAction(event.pointerId, event.clientX, event.clientY, rect.left + rect.width * 0.5, rect.top + rect.height * 0.5, performance.now());
       if (!wasOpen && this.input.action.radialOpen) this.telemetry.control("radial-open");
+      if (this.input.action.radialOpen && this.input.action.selectedPower !== previousPower) {
+        this.audio.radialSelect?.(this.input.action.selectedPower);
+        this.telemetry.control("radial-change", this.input.action.selectedPower);
+      }
       this.#renderRadialState();
     });
     const releaseAction = (event) => {
@@ -250,12 +258,12 @@ class RiftGame {
       const result = this.input.endAction(event.pointerId, performance.now());
       this.#closeRadialUI();
       if (!result) return;
-      if (result.type === "power") this.#armPower("player", result.power);
-      else if (result.type === "center") {
-        this.telemetry.control("center-release");
-        this.#performStrike("player", null, { preserveArmed: true });
+      if (result.type === "power-fire") this.#performStrike("player", result.power, { releaseToFire: true });
+      else {
+        if (result.fromCenter) this.telemetry.control("center-release");
+        else this.telemetry.control("tap-strike");
+        this.#performStrike("player", null);
       }
-      else this.#performStrike("player", this.armedPower.player);
     };
     actionButton.addEventListener("pointerup", releaseAction);
     actionButton.addEventListener("pointercancel", (event) => this.#cancelAction(event.pointerId));
@@ -321,6 +329,11 @@ class RiftGame {
   #renderRadialState() {
     const radialOpen = this.input.action.radialOpen;
     actionCluster.classList.toggle("open", radialOpen);
+    actionCluster.classList.toggle("has-selection", radialOpen && Boolean(this.input.action.selectedPower));
+    this.radialSelection = radialOpen ? this.input.action.selectedPower : null;
+    const selectedDefinition = this.radialSelection ? POWER_DEFINITIONS[this.radialSelection] : null;
+    if (selectedDefinition) actionCluster.style.setProperty("--selected-color", selectedDefinition.color);
+    else actionCluster.style.removeProperty("--selected-color");
     if (radialOpen && this.onboardingStage === "powers") this.#updateOnboardingUI();
     for (const option of powerOptions) {
       const definition = POWER_DEFINITIONS[option.dataset.power];
@@ -340,49 +353,33 @@ class RiftGame {
   #closeRadialUI() {
     actionButton.classList.remove("pressed");
     actionCluster.classList.remove("open");
+    actionCluster.classList.remove("has-selection");
+    actionCluster.style.removeProperty("--selected-color");
+    this.radialSelection = null;
     for (const option of powerOptions) option.classList.remove("selected");
     this.#updatePowerUI(true);
   }
 
-  #armPower(owner, power) {
-    const definition = POWER_DEFINITIONS[power];
-    if (!definition) return false;
-    if (this.flux[owner] + 0.01 < definition.cost) {
-      if (owner === "player") this.announce("LOW FLUX", 0.42);
-      this.audio.denied?.();
-      return false;
-    }
-    this.armedPower[owner] = power;
-    if (owner === "player") {
-      this.telemetry.control("power-arm", power);
-      this.announce(`${definition.label} ARMED`, 0.52);
-      this.audio.powerArm?.(power);
-      if (this.onboardingStage === "powers") {
-        this.onboardingStage = "done";
-        sessionStorage.setItem(ONBOARDING_KEY, "done");
-        this.#updateOnboardingUI();
-      }
-      this.#updatePowerUI(true);
-    }
-    return true;
-  }
-
-  #performStrike(owner, requestedPower = null, { preserveArmed = false } = {}) {
+  #performStrike(owner, requestedPower = null, { releaseToFire = false } = {}) {
     let power = requestedPower;
     const definition = power ? POWER_DEFINITIONS[power] : null;
-    if (definition && this.flux[owner] + 0.01 < definition.cost) power = null;
-    if (power) {
-      this.flux[owner] = Math.max(0, this.flux[owner] - POWER_DEFINITIONS[power].cost);
-      this.armedPower[owner] = null;
-    } else if (!preserveArmed && requestedPower) {
-      this.armedPower[owner] = null;
+    if (definition && this.flux[owner] + 0.01 < definition.cost) {
+      power = null;
+      if (owner === "player") {
+        this.announce("LOW FLUX • STRIKE", 0.46);
+        this.audio.denied?.();
+        this.telemetry.control("power-denied", requestedPower);
+      }
     }
     const fired = this.physics.requestStrike(owner, power);
     if (!fired) return false;
-    this.riderFx[owner].recoil = Math.max(this.riderFx[owner].recoil, power ? 0.58 : 0.34);
+    if (power) this.flux[owner] = Math.max(0, this.flux[owner] - POWER_DEFINITIONS[power].cost);
+    this.riderFx[owner].recoil = Math.max(this.riderFx[owner].recoil, power ? 0.66 : 0.42);
     if (owner === "player") {
+      if (power) this.telemetry.control("power-fire", power);
+      if (releaseToFire && power) this.audio.powerRelease?.(power);
       this.#updatePowerUI(true);
-      if (power) this.announce(POWER_DEFINITIONS[power].label, 0.34);
+      if (power) this.announce(`${POWER_DEFINITIONS[power].label} • FIRE`, 0.34);
     }
     return true;
   }
@@ -393,21 +390,10 @@ class RiftGame {
     this.lastFluxDisplay = roundedFlux;
     actionCluster.style.setProperty("--flux", String(roundedFlux));
     fluxValue.textContent = String(roundedFlux);
-    const armed = this.armedPower.player ? POWER_DEFINITIONS[this.armedPower.player] : null;
-    actionButton.classList.toggle("armed", Boolean(armed));
-    if (armed) {
-      actionButton.style.setProperty("--power-color", armed.color);
-      actionIcon.textContent = armed.icon;
-      actionLabel.textContent = armed.label;
-      actionButton.querySelector("small").textContent = "TAP";
-      armedPowerReadout.querySelector("span").textContent = "ARMED";
-    } else {
-      actionButton.style.removeProperty("--power-color");
-      actionIcon.textContent = "◆";
-      actionLabel.textContent = "STRIKE";
-      actionButton.querySelector("small").textContent = "TAP";
-      armedPowerReadout.querySelector("span").textContent = "FLUX";
-    }
+    actionIcon.textContent = "◆";
+    actionLabel.textContent = "STRIKE";
+    actionButton.querySelector("small").textContent = "TAP";
+    fluxReadout.querySelector("span").textContent = "FLUX";
     for (const option of powerOptions) {
       const definition = POWER_DEFINITIONS[option.dataset.power];
       option.classList.toggle("locked", this.flux.player + 0.01 < definition.cost);
@@ -443,8 +429,6 @@ class RiftGame {
     this.stats = this.#freshStats();
     this.flux.player = 100;
     this.flux.bot = 100;
-    this.armedPower.player = null;
-    this.armedPower.bot = null;
     this.matchStartedAt = performance.now();
     this.railsAnnounced = false;
     this.matchPointAnnounced = false;
@@ -564,10 +548,7 @@ class RiftGame {
       const matchPoint = this.scores.player === 2 || this.scores.bot === 2;
       this.lastBotState = this.bot.update(dt, this.physics, { scores: this.scores, matchPoint, botFlux: this.flux.bot });
       const botAction = this.bot.consumeAction();
-      if (botAction) {
-        if (botAction.power) this.#armPower("bot", botAction.power);
-        this.#performStrike("bot", this.armedPower.bot);
-      }
+      if (botAction) this.#performStrike("bot", botAction.power);
 
       const events = this.physics.step(dt);
       this.telemetry.sample(dt, this.physics);
@@ -580,6 +561,7 @@ class RiftGame {
           y: this.physics.core.y,
           speed: Math.hypot(this.physics.core.vx, this.physics.core.vy),
           influence: this.physics.nodes.player.influence - this.physics.nodes.bot.influence,
+          boost: this.coreTrailBoost,
         });
         if (this.trail.length > 40) this.trail.pop();
       }
@@ -606,7 +588,7 @@ class RiftGame {
     const messages = {
       move: "LEFT THUMB • MOVE",
       strike: "RIGHT THUMB • TAP TO STRIKE",
-      powers: "HOLD + FLICK • 4 POWERS",
+      powers: "HOLD • FLICK • RELEASE",
     };
     onboardingLabel.textContent = messages[this.onboardingStage] || "";
     onboardingCall.hidden = !messages[this.onboardingStage];
@@ -620,28 +602,39 @@ class RiftGame {
 
       if (event.type === "strike-start") {
         const fx = this.riderFx[event.owner];
-        fx.recoil = Math.max(fx.recoil, event.power ? 0.62 : 0.34);
-        if (event.owner === "player" && this.onboardingStage === "strike") {
-          this.onboardingStage = "powers";
-          this.#updateOnboardingUI();
-        }
+        fx.recoil = Math.max(fx.recoil, event.power ? 0.70 : 0.46);
+        fx.power = Math.max(fx.power, event.power ? 0.52 : 0.18);
       } else if (event.type === "strike") {
         this.spawnStrike(event);
         const fx = this.riderFx[event.owner];
         fx.flash = 1;
         fx.power = event.power ? 1 : 0.35;
-        this.shake = Math.max(this.shake, event.power ? 7.5 : event.sweetSpot ? 5 : 3.2);
-        this.hitStop = Math.max(this.hitStop, event.power ? 0.030 : event.sweetSpot ? 0.020 : 0.013);
-        this.crowdPulse = Math.max(this.crowdPulse, event.power ? 0.74 : 0.36);
+        const contactLevel = event.power ? 4 : event.perfect ? 3 : event.clean ? 2 : 1;
+        this.shake = Math.max(this.shake, [0, 4.6, 7.0, 9.2, 11.2][contactLevel]);
+        this.hitStop = Math.max(this.hitStop, [0, 0.026, 0.038, 0.050, 0.056][contactLevel]);
+        this.coreTrailBoost = Math.max(this.coreTrailBoost, [0, 0.46, 0.72, 0.90, 1][contactLevel]);
+        this.crowdPulse = Math.max(this.crowdPulse, [0, 0.40, 0.58, 0.76, 0.88][contactLevel]);
         if (event.owner === "player") {
           this.stats.strikes += 1;
           if (event.power) this.stats.powers += 1;
-          this.flux.player = Math.min(100, this.flux.player + (event.sweetSpot ? 8 : 4));
+          this.flux.player = Math.min(100, this.flux.player + (event.perfect ? 14 : event.clean ? 9 : 5));
           if (event.power) this.announce(`${POWER_DEFINITIONS[event.power].label} HIT`, 0.46);
-          else if (event.sweetSpot) this.announce("CLEAN STRIKE", 0.34);
+          else if (event.perfect) this.announce("PERFECT STRIKE", 0.44);
+          else if (event.clean) this.announce("CLEAN STRIKE", 0.34);
+          if (this.onboardingStage === "strike") {
+            this.onboardingStage = "powers";
+            this.#updateOnboardingUI();
+          } else if (event.power && this.onboardingStage === "powers") {
+            this.onboardingStage = "done";
+            sessionStorage.setItem(ONBOARDING_KEY, "done");
+            this.#updateOnboardingUI();
+          }
         }
       } else if (event.type === "strike-whiff") {
         if (event.owner === "player") this.stats.whiffs += 1;
+      } else if (event.type === "grip-release") {
+        this.coreTrailBoost = Math.max(this.coreTrailBoost, 0.58);
+        this.spawnSling({ ...event, charge: 0.58 });
       } else if (event.type === "surge") {
         this.announce("RIFT UNSTABLE", 0.70);
         this.flash = { alpha: 0.10, color: COLORS.chalk };
@@ -796,7 +789,7 @@ class RiftGame {
     const count = event.power ? 25 : event.sweetSpot ? 17 : 11;
     const heading = Math.atan2(core.vy, core.vx);
     for (let index = 0; index < count; index += 1) {
-      const spread = (Math.random() - 0.5) * (event.power === "burst" ? 2.0 : 0.9);
+      const spread = (Math.random() - 0.5) * (event.power === "pulse" ? 2.0 : 0.9);
       const angle = heading + Math.PI + spread;
       const speed = 95 + Math.random() * (event.power ? 250 : 150);
       this.particles.push({
@@ -868,6 +861,7 @@ class RiftGame {
     if (performance.now() >= this.statusExpires) statusCall.classList.remove("visible");
     this.shake = Math.max(0, this.shake - dt * 40);
     this.flash.alpha = Math.max(0, this.flash.alpha - dt * 2.0);
+    this.coreTrailBoost = Math.max(0, this.coreTrailBoost - dt * 1.85);
     this.crowdPulse = Math.max(0, this.crowdPulse - dt * 0.82);
     this.finDeploy += (Number(this.physics.railsActive) - this.finDeploy) * Math.min(1, dt * 3.8);
     for (const fx of Object.values(this.riderFx)) {
@@ -983,6 +977,7 @@ const publicApi = {
   identity: BUILD_IDENTITY,
   orientation: "landscape",
   control: "dual-thumb-joystick-radial",
+  powerExecution: "hold-drag-release-fire",
   physics: game.physicsMode,
   candidate: CANDIDATE_CONFIGS[game.physicsMode].label,
   camera: game.cameraMode,
@@ -1007,7 +1002,7 @@ const publicApi = {
       camera: game.cameraMode,
       input: game.input.snapshot(),
       flux: { ...game.flux },
-      armedPower: { ...game.armedPower },
+      audio: game.audio.diagnostics?.() || null,
     };
   },
   telemetry() {

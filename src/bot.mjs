@@ -10,7 +10,7 @@ export const BOT_STATES = Object.freeze({
 
 export const BOT_PROFILES = Object.freeze({
   sparring: Object.freeze({ reaction: 0.205, decisionInterval: 0.105, predictionHorizon: 0.44, baseError: 18, fastError: 28, aggression: 0.46, risk: 0.38, movementPrecision: 0.78 }),
-  wraith: Object.freeze({ reaction: 0.158, decisionInterval: 0.086, predictionHorizon: 0.56, baseError: 12, fastError: 22, aggression: 0.66, risk: 0.60, movementPrecision: 0.90 }),
+  wraith: Object.freeze({ reaction: 0.148, decisionInterval: 0.082, predictionHorizon: 0.58, baseError: 11, fastError: 20, aggression: 0.71, risk: 0.65, movementPrecision: 0.93 }),
   apex: Object.freeze({ reaction: 0.112, decisionInterval: 0.066, predictionHorizon: 0.66, baseError: 7, fastError: 14, aggression: 0.78, risk: 0.70, movementPrecision: 0.97 }),
 });
 
@@ -47,6 +47,9 @@ export class RiftBot {
     this.intent = { x: 195, y: 240, strength: 0 };
     this.actionTimer = 0;
     this.pendingAction = null;
+    this.queuedAction = null;
+    this.telegraphTimer = 0;
+    this.telegraphPower = null;
   }
 
   reset() {
@@ -61,12 +64,23 @@ export class RiftBot {
     this.intent = { x: 195, y: 240, strength: 0 };
     this.actionTimer = 0;
     this.pendingAction = null;
+    this.queuedAction = null;
+    this.telegraphTimer = 0;
+    this.telegraphPower = null;
   }
 
   update(dt, physics, context = {}) {
     this.time += dt;
     this.decisionTimer -= dt;
     this.actionTimer = Math.max(0, this.actionTimer - dt);
+    if (this.queuedAction) {
+      this.telegraphTimer = Math.max(0, this.telegraphTimer - dt);
+      if (this.telegraphTimer <= 0 && !this.pendingAction) {
+        this.pendingAction = this.queuedAction;
+        this.queuedAction = null;
+        this.telegraphPower = null;
+      }
+    }
     const core = physics.core;
     this.history.push({ time: this.time, x: core.x, y: core.y, vx: core.vx, vy: core.vy, speed: Math.hypot(core.vx, core.vy) });
     while (this.history.length > 2 && this.time - this.history[0].time > 1.25) this.history.shift();
@@ -95,6 +109,10 @@ export class RiftBot {
     this.intent.x = this.target.x;
     this.intent.y = this.target.y;
     this.intent.strength = clamp(0.35 + this.readConfidence * 0.45 + (this.state === BOT_STATES.SCRAMBLE ? 0.2 : 0), 0, 1);
+    physics.nodes.bot.telegraphPower = this.telegraphPower;
+    physics.nodes.bot.telegraphStrength = this.telegraphPower
+      ? clamp(1 - this.telegraphTimer / 0.24, 0.18, 1)
+      : 0;
     physics.setNodeTarget("bot", this.target.x, this.target.y);
     return this.state;
   }
@@ -106,7 +124,7 @@ export class RiftBot {
   }
 
   #considerAction(core, physics, context) {
-    if (this.actionTimer > 0 || this.pendingAction) return;
+    if (this.actionTimer > 0 || this.pendingAction || this.queuedAction) return;
     const node = physics.nodes.bot;
     const observedDistance = Math.hypot(core.x - node.x, core.y - node.y);
     const tacticalReach = this.state === BOT_STATES.SCRAMBLE ? 138 : 110;
@@ -118,15 +136,26 @@ export class RiftBot {
     if (!urgency && !incoming && !attackable) return;
 
     const riskRoll = this.random();
+    const centralLane = Math.abs(core.x - 195) < 60;
+    const fastIncoming = core.vy < -210;
     let power = null;
-    if (context.botFlux >= 40 && this.state === BOT_STATES.SCRAMBLE && riskRoll < 0.72) power = "burst";
-    else if (context.botFlux >= 26 && this.state === BOT_STATES.COUNTER && riskRoll < 0.58) power = "brake";
-    else if (context.botFlux >= 36 && this.state === BOT_STATES.PRESS && riskRoll < this.profile.risk * 0.72) power = "rush";
-    else if (context.botFlux >= 30 && this.state === BOT_STATES.TRAP && riskRoll < this.profile.risk * 0.62) power = "bend";
+    if (context.botFlux >= 40 && this.state === BOT_STATES.SCRAMBLE && riskRoll < 0.78) power = "pulse";
+    else if (context.botFlux >= 30 && this.state === BOT_STATES.TRAP && Math.abs(core.vy) < 235 && riskRoll < 0.68) power = "grip";
+    else if (context.botFlux >= 34 && this.state === BOT_STATES.COUNTER && !centralLane && riskRoll < 0.62) power = "bend";
+    else if (context.botFlux >= 40 && this.state === BOT_STATES.COUNTER && fastIncoming && riskRoll < 0.72) power = "pulse";
+    else if (context.botFlux >= 48 && this.state === BOT_STATES.PRESS && centralLane && riskRoll < this.profile.risk * 0.76) power = "rush";
+    else if (context.botFlux >= 34 && this.state === BOT_STATES.PRESS && !centralLane && riskRoll < this.profile.risk * 0.58) power = "bend";
 
     const timingError = (this.random() - 0.5) * (0.065 + (1 - this.profile.movementPrecision) * 0.12);
     this.actionTimer = clamp(0.60 + timingError, 0.46, 0.86);
-    this.pendingAction = { type: "strike", power, observedDistance, state: this.state };
+    const action = { type: "strike", power, observedDistance, state: this.state };
+    if (power) {
+      this.queuedAction = action;
+      this.telegraphPower = power;
+      this.telegraphTimer = power === "rush" ? 0.24 : power === "pulse" ? 0.19 : 0.15;
+    } else {
+      this.pendingAction = action;
+    }
   }
 
   #observedCore() {

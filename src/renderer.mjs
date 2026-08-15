@@ -1,4 +1,5 @@
 import { BOT_STATES } from "./bot.mjs";
+import { POWER_DEFINITIONS } from "./input.mjs";
 import {
   ARENA,
   REFERENCE_HEIGHT,
@@ -559,7 +560,8 @@ export class RiftRenderer {
     if (game.trail.length < 2) return;
     const context = this.context;
     const speed = Math.hypot(game.physics.core.vx, game.physics.core.vy);
-    const visibleCount = Math.min(game.trail.length, Math.round(12 + clamp(speed / 760, 0, 1) * 26));
+    const boost = clamp(game.coreTrailBoost || game.trail[0]?.boost || 0, 0, 1);
+    const visibleCount = Math.min(game.trail.length, Math.round(12 + clamp(speed / 760, 0, 1) * 26 + boost * 9));
     for (let ribbon = -1; ribbon <= 1; ribbon += 1) {
       context.beginPath();
       for (let index = 0; index < visibleCount; index += 1) {
@@ -580,8 +582,8 @@ export class RiftRenderer {
       const influence = game.trail[0]?.influence ?? 0;
       const curveColor = game.physics.core.curveTime > 0 ? (game.physics.core.curveOwner === "player" ? COLORS.cyan : COLORS.violetHot) : null;
       const base = curveColor || (ribbon === 0 ? COLORS.chalk : influence > 0.07 ? COLORS.amber : influence < -0.07 ? COLORS.violet : ribbon < 0 ? COLORS.amber : COLORS.violet);
-      context.strokeStyle = rgba(base, (ribbon === 0 ? 0.20 : 0.12) + clamp(speed / 760, 0, 1) * (ribbon === 0 ? 0.52 : 0.38));
-      context.lineWidth = ribbon === 0 ? 1.5 + clamp(speed / 760, 0, 1) * 2.8 : 1.1 + clamp(speed / 760, 0, 1) * 2.1;
+      context.strokeStyle = rgba(base, (ribbon === 0 ? 0.20 : 0.12) + clamp(speed / 760, 0, 1) * (ribbon === 0 ? 0.52 : 0.38) + boost * 0.18);
+      context.lineWidth = ribbon === 0 ? 1.5 + clamp(speed / 760, 0, 1) * 2.8 + boost * 2.6 : 1.1 + clamp(speed / 760, 0, 1) * 2.1 + boost * 1.4;
       context.lineCap = "round";
       context.stroke();
     }
@@ -767,6 +769,26 @@ export class RiftRenderer {
       context.restore();
     }
 
+    if (!isPlayer && node.telegraphPower) {
+      const definition = POWER_DEFINITIONS[node.telegraphPower];
+      const telegraph = clamp(node.telegraphStrength || 0.2, 0, 1);
+      context.save();
+      context.rotate(-angle);
+      context.strokeStyle = definition?.color || hot;
+      context.globalAlpha = 0.42 + telegraph * 0.48;
+      context.lineWidth = 2.2 + telegraph * 2.2;
+      context.setLineDash([7, 5]);
+      context.lineDashOffset = -game.visualTime * 62;
+      context.beginPath();
+      context.arc(0, 0, 47 + telegraph * 9, -Math.PI * 0.78, Math.PI * 0.78);
+      context.stroke();
+      context.globalAlpha = 0.28 + telegraph * 0.50;
+      context.fillStyle = definition?.color || hot;
+      polygon(context, [[39, -7], [52 + telegraph * 8, 0], [39, 7], [43, 0]]);
+      context.fill();
+      context.restore();
+    }
+
     if (isPlayer) this.#drawHeroChassis(game, node, color, hot, speedN, influence, charge, fx);
     else this.#drawWraithChassis(game, node, color, hot, speedN, influence, charge, fx);
     context.restore();
@@ -923,6 +945,8 @@ export class RiftRenderer {
     const point = this.#project(core.x, core.y, 17);
     const speed = Math.hypot(core.vx || 0, core.vy || 0);
     const stretch = clamp(speed / 820, 0, 1);
+    const impact = clamp(core.impactCompression || 0, 0, 1);
+    const snap = clamp(core.impactSnap || 0, 0, 1);
     const velocityAngle = this.camera.direction(core.x, core.y, core.vx || 1, core.vy || 0);
     const playerInfluence = game.physics.nodes.player.influence || 0;
     const botInfluence = game.physics.nodes.bot.influence || 0;
@@ -931,10 +955,14 @@ export class RiftRenderer {
     context.save();
     context.translate(point.x, point.y);
     context.rotate(velocityAngle);
-    context.scale(extraScale * point.scale * (1 + stretch * 0.23), extraScale * point.scale * (1 - stretch * 0.10));
+    const contactFreeze = game.hitStop > 0 ? impact : 0;
+    context.scale(
+      extraScale * point.scale * (1 + stretch * 0.23 + snap * 0.16 - contactFreeze * 0.30),
+      extraScale * point.scale * (1 - stretch * 0.10 - snap * 0.06 + contactFreeze * 0.28),
+    );
 
     const halo = context.createRadialGradient(0, 0, 3, 0, 0, 42);
-    halo.addColorStop(0, "rgba(255,248,223,0.58)");
+    halo.addColorStop(0, `rgba(255,248,223,${0.58 + Math.max(impact, snap) * 0.30})`);
     halo.addColorStop(0.28, rgba(threat > 0.4 ? COLORS.danger : COLORS.chalk, 0.16 + pressure * 0.09));
     halo.addColorStop(1, "rgba(255,248,223,0)");
     context.fillStyle = halo;
