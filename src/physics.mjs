@@ -353,12 +353,13 @@ export class RiftPhysics {
 
     const direction = { x: dx / distance, y: dy / distance };
     const movingBonus = 1 + Math.min(nodeSpeed / 650, 1) * this.config.movingFieldBonus;
-    const force = this.config.fieldStrength * Math.pow(falloff, this.config.fieldExponent) * movingBonus;
+    const breakAuthority = 1 - this.overtimeOpen * 0.66;
+    const force = this.config.fieldStrength * Math.pow(falloff, this.config.fieldExponent) * movingBonus * breakAuthority;
     this.core.vx += direction.x * force * dt;
     this.core.vy += direction.y * force * dt;
 
     if (this.config.continuousTransfer > 0) {
-      const transfer = this.config.continuousTransfer * falloff * falloff * dt * 4.2;
+      const transfer = this.config.continuousTransfer * falloff * falloff * dt * 4.2 * breakAuthority;
       this.core.vx += node.vx * transfer;
       this.core.vy += node.vy * transfer;
     }
@@ -503,7 +504,7 @@ export class RiftPhysics {
       this.events.push({ type: "rebound", surface: "right-wall", speed: length(this.core.vx, this.core.vy) });
     }
 
-    const liveGoalHalfWidth = ARENA.goalHalfWidth + this.duelSurge * 14 + this.overtimeOpen * 26;
+    const liveGoalHalfWidth = ARENA.goalHalfWidth + this.duelSurge * 14 + this.overtimeOpen * 42;
     const inMouth = Math.abs(this.core.x - REFERENCE_WIDTH / 2) <= liveGoalHalfWidth;
     if (inMouth && this.core.y <= ARENA.topReactorY) {
       this.#score("player");

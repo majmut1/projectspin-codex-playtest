@@ -10,7 +10,7 @@ import {
   RiftPhysics,
 } from "./physics.mjs";
 
-const BUILD_ID = "RIFT-20260815.2";
+const BUILD_ID = "RIFT-20260815.3";
 const BUILD_IDENTITY = `CODEX • RIFTBALL • ${BUILD_ID}`;
 const FIXED_STEP = 1 / 120;
 const WIN_SCORE = 3;
@@ -698,7 +698,7 @@ class RiftGame {
     context.save();
     context.translate(x, y);
     context.rotate(rotation);
-    context.scale(pulse * (1 + this.physics.duelSurge * 0.14 + this.physics.overtimeOpen * 0.28), pulse);
+    context.scale(pulse * (1 + this.physics.duelSurge * 0.14 + this.physics.overtimeOpen * 0.42), pulse);
     context.fillStyle = "#07080d";
     context.strokeStyle = "#454b58";
     context.lineWidth = 8;
