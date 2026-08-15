@@ -1,0 +1,18 @@
+{
+  "name": "RIFTBALL",
+  "short_name": "RIFTBALL",
+  "description": "The fastest illegal zero-g duel sport in the galaxy.",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#08070b",
+  "theme_color": "#08070b",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -2,46 +2,23 @@ export const REFERENCE_WIDTH = 390;
 export const REFERENCE_HEIGHT = 844;
 
 export const PHYSICS_MODES = Object.freeze({
-  FIELD: "field",
-  TRANSFER: "transfer",
   TETHER: "tether",
+  DRIVE: "drive",
+  COUNTER: "counter",
 });
 
 export const CANDIDATE_CONFIGS = Object.freeze({
-  [PHYSICS_MODES.FIELD]: Object.freeze({
-    label: "FIELD",
-    fieldRadius: 174,
-    fieldStrength: 920,
-    fieldExponent: 1.75,
-    movingFieldBonus: 0.08,
-    continuousTransfer: 0.0,
-    contactTransfer: 0.08,
-    contactRestitution: 0.74,
-    releaseTransfer: 0.0,
-    releaseKick: 0,
-    coreDamping: 0.9970,
-    baseSpeedCap: 500,
-  }),
-  [PHYSICS_MODES.TRANSFER]: Object.freeze({
-    label: "TRANSFER",
-    fieldRadius: 162,
-    fieldStrength: 710,
-    fieldExponent: 1.90,
-    movingFieldBonus: 0.24,
-    continuousTransfer: 0.11,
-    contactTransfer: 0.36,
-    contactRestitution: 0.78,
-    releaseTransfer: 0.0,
-    releaseKick: 0,
-    coreDamping: 0.9977,
-    baseSpeedCap: 585,
-  }),
   [PHYSICS_MODES.TETHER]: Object.freeze({
-    label: "TETHER-SLING",
+    label: "TETHER BASELINE",
     fieldRadius: 178,
     fieldStrength: 735,
     fieldExponent: 2.05,
     movingFieldBonus: 0.34,
+    stationaryAuthority: 1,
+    contestBias: 0,
+    contestInstability: 0,
+    heatPenalty: 0,
+    momentumPriority: 0,
     continuousTransfer: 0.075,
     contactTransfer: 0.43,
     contactRestitution: 0.82,
@@ -49,6 +26,44 @@ export const CANDIDATE_CONFIGS = Object.freeze({
     releaseKick: 86,
     coreDamping: 0.9982,
     baseSpeedCap: 620,
+  }),
+  [PHYSICS_MODES.DRIVE]: Object.freeze({
+    label: "DRIVE-SLING",
+    fieldRadius: 176,
+    fieldStrength: 748,
+    fieldExponent: 2.02,
+    movingFieldBonus: 0.52,
+    stationaryAuthority: 0.34,
+    contestBias: 0.58,
+    contestInstability: 108,
+    heatPenalty: 0.48,
+    momentumPriority: 0.16,
+    continuousTransfer: 0.090,
+    contactTransfer: 0.47,
+    contactRestitution: 0.84,
+    releaseTransfer: 0.25,
+    releaseKick: 112,
+    coreDamping: 0.99835,
+    baseSpeedCap: 644,
+  }),
+  [PHYSICS_MODES.COUNTER]: Object.freeze({
+    label: "COUNTER-SLING",
+    fieldRadius: 170,
+    fieldStrength: 748,
+    fieldExponent: 2.14,
+    movingFieldBonus: 0.44,
+    stationaryAuthority: 0.46,
+    contestBias: 0.74,
+    contestInstability: 152,
+    heatPenalty: 0.34,
+    momentumPriority: 0.44,
+    continuousTransfer: 0.065,
+    contactTransfer: 0.56,
+    contactRestitution: 0.88,
+    releaseTransfer: 0.22,
+    releaseKick: 104,
+    coreDamping: 0.9985,
+    baseSpeedCap: 650,
   }),
 });
 
@@ -140,6 +155,12 @@ export class RiftPhysics {
     this.overtimeOpen = 0;
     this.surgeAnnounced = false;
     this.breakAnnounced = false;
+    this.contention = 0;
+    this.contestDominance = 0;
+    this.contestedSeconds = 0;
+    this.stallSeconds = 0;
+    this.longestStall = 0;
+    this.currentStall = 0;
     this.lastTouch = null;
     this.sameSideChain = 0;
     this.rallyContacts = 0;
@@ -180,6 +201,8 @@ export class RiftPhysics {
       tetherCooldown: 0,
       closestDistance: Infinity,
       influence: 0,
+      authority: 0,
+      fieldHeat: 0,
       fieldAngle: 0,
     };
   }
@@ -206,6 +229,12 @@ export class RiftPhysics {
     this.overtimeOpen = 0;
     this.surgeAnnounced = false;
     this.breakAnnounced = false;
+    this.contention = 0;
+    this.contestDominance = 0;
+    this.contestedSeconds = 0;
+    this.stallSeconds = 0;
+    this.longestStall = 0;
+    this.currentStall = 0;
     this.lastTouch = null;
     this.sameSideChain = 0;
     this.rallyContacts = 0;
@@ -238,6 +267,8 @@ export class RiftPhysics {
     node.tetherCooldown = 0;
     node.closestDistance = Infinity;
     node.influence = 0;
+    node.authority = 0;
+    node.fieldHeat = 0;
   }
 
   launch(direction = "neutral", speed = 176) {
@@ -259,8 +290,21 @@ export class RiftPhysics {
 
     this.#updateNode(this.nodes.player, dt, true);
     this.#updateNode(this.nodes.bot, dt, false);
-    this.#applyNodeField(this.nodes.player, dt);
-    this.#applyNodeField(this.nodes.bot, dt);
+    const fieldIntents = {
+      player: this.#measureField(this.nodes.player, dt),
+      bot: this.#measureField(this.nodes.bot, dt),
+    };
+    this.contention = Math.min(fieldIntents.player.falloff, fieldIntents.bot.falloff);
+    const authorityTotal = fieldIntents.player.authority + fieldIntents.bot.authority + EPSILON;
+    this.contestDominance = clamp(
+      (fieldIntents.player.authority - fieldIntents.bot.authority) / authorityTotal,
+      -1,
+      1,
+    );
+    if (this.contention > 0.16) this.contestedSeconds += dt;
+    this.#applyNodeField(this.nodes.player, fieldIntents.player, dt);
+    this.#applyNodeField(this.nodes.bot, fieldIntents.bot, dt);
+    this.#resolveContention(fieldIntents, dt);
 
     const damping = Math.pow(this.config.coreDamping, dt * 60);
     this.core.vx *= damping;
@@ -282,6 +326,14 @@ export class RiftPhysics {
     const speedCap = this.config.baseSpeedCap + this.pressure * 260 + (this.matchPoint ? 26 : 0);
     this.#clampCoreSpeed(speedCap);
     let currentSpeed = length(this.core.vx, this.core.vy);
+    const stalled = this.contention > 0.20 && currentSpeed < 96;
+    if (stalled) {
+      this.currentStall += dt;
+      this.stallSeconds += dt;
+      this.longestStall = Math.max(this.longestStall, this.currentStall);
+    } else {
+      this.currentStall = Math.max(0, this.currentStall - dt * 2.5);
+    }
     const minimumPace = this.roundTime > 7 ? 105 + longDuelPressure * 330 + this.overtimeOpen * 240 : 0;
     if (minimumPace > 0 && currentSpeed < minimumPace) {
       if (currentSpeed > 12) this.lastMotionAngle = Math.atan2(this.core.vy, this.core.vx);
@@ -339,32 +391,60 @@ export class RiftPhysics {
     node.fieldAngle += dt * (1.7 + Math.min(length(node.vx, node.vy) / 260, 2.4));
   }
 
-  #applyNodeField(node, dt) {
+  #measureField(node, dt) {
     const dx = node.x - this.core.x;
     const dy = node.y - this.core.y;
     const distance = Math.max(length(dx, dy), 1);
     const falloff = clamp(1 - distance / this.config.fieldRadius, 0, 1);
     const nodeSpeed = length(node.vx, node.vy);
+    const moving = clamp(nodeSpeed / 520, 0, 1);
+    if (falloff > 0.20 && nodeSpeed < 86) node.fieldHeat = clamp(node.fieldHeat + dt * 0.72, 0, 1);
+    else node.fieldHeat = clamp(node.fieldHeat - dt * (0.78 + moving * 1.12), 0, 1);
+    const movementAuthority = this.config.stationaryAuthority + (1 - this.config.stationaryAuthority) * moving;
+    const authority = movementAuthority * (1 - node.fieldHeat * this.config.heatPenalty);
     node.influence = falloff;
+    node.authority = authority;
+    return { dx, dy, distance, falloff, nodeSpeed, moving, authority };
+  }
+
+  #applyNodeField(node, intent, dt) {
+    const { dx, dy, distance, falloff, nodeSpeed, moving, authority } = intent;
     if (falloff <= 0) {
       this.#releaseTetherIfReady(node, distance);
       return;
     }
 
     const direction = { x: dx / distance, y: dy / distance };
-    const movingBonus = 1 + Math.min(nodeSpeed / 650, 1) * this.config.movingFieldBonus;
+    const movingBonus = 1 + moving * this.config.movingFieldBonus;
     const breakAuthority = 1 - this.overtimeOpen * 0.66;
-    const force = this.config.fieldStrength * Math.pow(falloff, this.config.fieldExponent) * movingBonus * breakAuthority;
+    const signedDominance = node.owner === "player" ? this.contestDominance : -this.contestDominance;
+    const contestMultiplier = this.contention > 0.08
+      ? clamp(1 + signedDominance * this.config.contestBias, 0.32, 1.68)
+      : 1;
+    const coreSpeed = length(this.core.vx, this.core.vy);
+    const momentumAlignment = coreSpeed > 12
+      ? dot(direction.x, direction.y, this.core.vx / coreSpeed, this.core.vy / coreSpeed)
+      : 0;
+    const momentumMultiplier = momentumAlignment < 0
+      ? 1 - this.config.momentumPriority * Math.min(-momentumAlignment, 1)
+      : 1;
+    const force = this.config.fieldStrength
+      * Math.pow(falloff, this.config.fieldExponent)
+      * movingBonus
+      * authority
+      * contestMultiplier
+      * momentumMultiplier
+      * breakAuthority;
     this.core.vx += direction.x * force * dt;
     this.core.vy += direction.y * force * dt;
 
     if (this.config.continuousTransfer > 0) {
-      const transfer = this.config.continuousTransfer * falloff * falloff * dt * 4.2 * breakAuthority;
+      const transfer = this.config.continuousTransfer * falloff * falloff * dt * 4.2 * breakAuthority * authority;
       this.core.vx += node.vx * transfer;
       this.core.vy += node.vy * transfer;
     }
 
-    if (this.mode === PHYSICS_MODES.TETHER && node.tetherCooldown <= 0 && nodeSpeed > 72 && distance < CLOSE_RADIUS) {
+    if (node.tetherCooldown <= 0 && nodeSpeed > 72 && distance < CLOSE_RADIUS) {
       const radial = normalized(this.core.x - node.x, this.core.y - node.y);
       const tangentSpeed = Math.abs(cross(radial.x, radial.y, node.vx, node.vy));
       const approach = Math.max(0, dot(node.vx, node.vy, radial.x, radial.y));
@@ -380,7 +460,44 @@ export class RiftPhysics {
     }
 
     if (falloff > 0.16) {
-      this.events.push({ type: "field", owner: node.owner, strength: falloff, distance });
+      this.events.push({
+        type: "field",
+        owner: node.owner,
+        strength: falloff,
+        distance,
+        authority,
+        heat: node.fieldHeat,
+        contested: this.contention,
+      });
+    }
+  }
+
+  #resolveContention(intents, dt) {
+    if (this.contention <= 0.15 || this.config.contestInstability <= 0) return;
+    const speed = length(this.core.vx, this.core.vy);
+    const movementVectorX = this.nodes.player.vx - this.nodes.bot.vx;
+    const movementVectorY = this.nodes.player.vy - this.nodes.bot.vy;
+    const movementMagnitude = length(movementVectorX, movementVectorY);
+    const direction = movementMagnitude > 22
+      ? normalized(movementVectorX, movementVectorY)
+      : normalized(this.core.vx || 1, this.core.vy);
+    const side = Math.sign(cross(
+      intents.player.dx,
+      intents.player.dy,
+      intents.bot.dx,
+      intents.bot.dy,
+    )) || (this.contestDominance >= 0 ? 1 : -1);
+    const instability = this.config.contestInstability
+      * this.contention
+      * (0.35 + Math.abs(this.contestDominance) * 0.65)
+      * clamp(1 - speed / 540, 0.20, 1);
+    this.core.vx += (-direction.y * side + direction.x * this.contestDominance * 0.35) * instability * dt;
+    this.core.vy += (direction.x * side + direction.y * this.contestDominance * 0.35) * instability * dt;
+    if (this.currentStall > 0.42) {
+      this.pressure = clamp(this.pressure + dt * 0.045, 0, 1);
+      if (this.currentStall > 0.44 && this.currentStall - dt <= 0.44) {
+        this.events.push({ type: "contest-break", dominance: this.contestDominance, strength: this.contention });
+      }
     }
   }
 
@@ -447,6 +564,15 @@ export class RiftPhysics {
     const defensive = defensiveDanger && reversedThreat;
     const clutch = defensive && clutchZone;
     const perfect = nodeSpeed > 360 && approachAlignment > 0.80 && approachSpeed > 250;
+
+    if (clutch) {
+      const counterDirection = node.owner === "player" ? -1 : 1;
+      this.core.vy += counterDirection * (82 + Math.min(nodeSpeed * 0.10, 72));
+      this.core.vx += node.vx * 0.06;
+    } else if (perfect) {
+      this.core.vx += node.vx * 0.035;
+      this.core.vy += node.vy * 0.035;
+    }
 
     this.rallyContacts += 1;
     if (perfect) this.pressure = clamp(this.pressure + 0.17 + Math.min(this.rallyContacts * 0.004, 0.04), 0, 1);
@@ -548,6 +674,13 @@ export class RiftPhysics {
       time: this.time,
       roundTime: this.roundTime,
       pressure: this.pressure,
+      duelSurge: this.duelSurge,
+      overtimeOpen: this.overtimeOpen,
+      contention: this.contention,
+      contestDominance: this.contestDominance,
+      contestedSeconds: this.contestedSeconds,
+      stallSeconds: this.stallSeconds,
+      longestStall: this.longestStall,
       railsActive: this.railsActive,
       matchPoint: this.matchPoint,
       core: { ...this.core },

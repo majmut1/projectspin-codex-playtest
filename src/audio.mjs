@@ -13,6 +13,16 @@ export class RiftAudio {
     this.coreSub = null;
     this.fieldGain = null;
     this.fieldOsc = null;
+    this.playerEngineGain = null;
+    this.playerEngineOsc = null;
+    this.wraithEngineGain = null;
+    this.wraithEngineOsc = null;
+    this.dangerGain = null;
+    this.dangerOsc = null;
+    this.crowdGain = null;
+    this.musicPhase = "MENU";
+    this.nextBeat = 0;
+    this.beatIndex = 0;
     this.unlocked = false;
     this.enabled = true;
   }
@@ -73,9 +83,71 @@ export class RiftAudio {
     this.fieldOsc.frequency.value = 92;
     this.fieldOsc.connect(fieldFilter).connect(this.fieldGain).connect(this.master);
     this.fieldOsc.start(now);
+
+    this.playerEngineGain = this.context.createGain();
+    this.playerEngineGain.gain.value = 0;
+    const playerFilter = this.context.createBiquadFilter();
+    playerFilter.type = "lowpass";
+    playerFilter.frequency.value = 540;
+    this.playerEngineOsc = this.context.createOscillator();
+    this.playerEngineOsc.type = "sawtooth";
+    this.playerEngineOsc.frequency.value = 54;
+    this.playerEngineOsc.connect(playerFilter).connect(this.playerEngineGain).connect(this.master);
+    this.playerEngineOsc.start(now);
+
+    this.wraithEngineGain = this.context.createGain();
+    this.wraithEngineGain.gain.value = 0;
+    const wraithFilter = this.context.createBiquadFilter();
+    wraithFilter.type = "bandpass";
+    wraithFilter.frequency.value = 410;
+    wraithFilter.Q.value = 2.2;
+    this.wraithEngineOsc = this.context.createOscillator();
+    this.wraithEngineOsc.type = "square";
+    this.wraithEngineOsc.frequency.value = 46;
+    this.wraithEngineOsc.connect(wraithFilter).connect(this.wraithEngineGain).connect(this.master);
+    this.wraithEngineOsc.start(now);
+
+    this.dangerGain = this.context.createGain();
+    this.dangerGain.gain.value = 0;
+    this.dangerOsc = this.context.createOscillator();
+    this.dangerOsc.type = "triangle";
+    this.dangerOsc.frequency.value = 188;
+    this.dangerOsc.connect(this.dangerGain).connect(this.master);
+    this.dangerOsc.start(now);
+
+    const crowdBuffer = this.context.createBuffer(1, Math.floor(this.context.sampleRate * 1.4), this.context.sampleRate);
+    const crowdData = crowdBuffer.getChannelData(0);
+    let memory = 0;
+    for (let index = 0; index < crowdData.length; index += 1) {
+      memory = memory * 0.965 + (Math.random() * 2 - 1) * 0.035;
+      crowdData[index] = memory;
+    }
+    const crowdSource = this.context.createBufferSource();
+    crowdSource.buffer = crowdBuffer;
+    crowdSource.loop = true;
+    const crowdFilter = this.context.createBiquadFilter();
+    crowdFilter.type = "bandpass";
+    crowdFilter.frequency.value = 1260;
+    crowdFilter.Q.value = 0.55;
+    this.crowdGain = this.context.createGain();
+    this.crowdGain.gain.value = 0;
+    crowdSource.connect(crowdFilter).connect(this.crowdGain).connect(this.master);
+    crowdSource.start(now);
   }
 
-  update({ speed = 0, playerField = 0, botField = 0, tension = 0, active = true } = {}) {
+  update({
+    speed = 0,
+    playerField = 0,
+    botField = 0,
+    playerSpeed = 0,
+    botSpeed = 0,
+    tension = 0,
+    danger = 0,
+    crowd = 0,
+    contested = 0,
+    phase = "DUEL",
+    active = true,
+  } = {}) {
     if (!this.unlocked || !this.enabled) return;
     const now = this.context.currentTime;
     const normalizedSpeed = clamp(speed / 720, 0, 1);
@@ -84,7 +156,40 @@ export class RiftAudio {
     this.coreOsc.frequency.setTargetAtTime(66 + normalizedSpeed * 112 + tension * 24, now, 0.035);
     this.coreSub.frequency.setTargetAtTime(33 + normalizedSpeed * 28, now, 0.05);
     this.fieldGain.gain.setTargetAtTime(active ? field * field * 0.025 : 0, now, 0.035);
-    this.fieldOsc.frequency.setTargetAtTime(76 + field * 138 + normalizedSpeed * 38, now, 0.035);
+    this.fieldOsc.frequency.setTargetAtTime(76 + field * 138 + normalizedSpeed * 38 + contested * 42, now, 0.035);
+    const playerVelocity = clamp(playerSpeed / 900, 0, 1);
+    const wraithVelocity = clamp(botSpeed / 700, 0, 1);
+    this.playerEngineGain.gain.setTargetAtTime(active ? 0.003 + playerVelocity * 0.018 : 0, now, 0.045);
+    this.playerEngineOsc.frequency.setTargetAtTime(48 + playerVelocity * 136, now, 0.035);
+    this.wraithEngineGain.gain.setTargetAtTime(active ? 0.002 + wraithVelocity * 0.014 : 0, now, 0.045);
+    this.wraithEngineOsc.frequency.setTargetAtTime(42 + wraithVelocity * 118, now, 0.040);
+    this.dangerGain.gain.setTargetAtTime(active ? danger * danger * 0.020 : 0, now, 0.025);
+    this.dangerOsc.frequency.setTargetAtTime(168 + danger * 92 + Math.sin(now * 12) * danger * 18, now, 0.020);
+    this.crowdGain.gain.setTargetAtTime(active ? 0.002 + clamp(crowd + tension * 0.4, 0, 1) * 0.020 : 0, now, 0.18);
+    this.#updateMusic(active ? phase : "MENU", tension);
+  }
+
+  #updateMusic(phase, tension) {
+    if (!this.context || !this.unlocked) return;
+    if (phase !== this.musicPhase) {
+      this.musicPhase = phase;
+      this.nextBeat = this.context.currentTime + 0.04;
+      this.beatIndex = 0;
+    }
+    const now = this.context.currentTime;
+    if (now < this.nextBeat) return;
+    const tempo = phase === "MATCH_POINT" ? 0.215 : phase === "PRESSURE" ? 0.255 : phase === "VICTORY" ? 0.34 : phase === "MENU" ? 0.52 : 0.34;
+    const roots = phase === "MATCH_POINT" ? [55, 73.4, 82.4, 110] : phase === "MENU" ? [49, 65.4, 73.4, 98] : [55, 65.4, 82.4, 98];
+    const root = roots[this.beatIndex % roots.length];
+    const accent = this.beatIndex % 4 === 0;
+    if (phase !== "VICTORY") {
+      this.#tone({ from: root * (accent ? 1 : 0.98), to: root, duration: tempo * 0.78, gain: 0.022 + tension * 0.014 + (accent ? 0.012 : 0), type: "triangle", filter: 420 });
+      if (phase === "MATCH_POINT" && this.beatIndex % 2 === 0) {
+        this.#tone({ from: root * 4, to: root * 2.7, duration: tempo * 0.52, gain: 0.020, type: "sawtooth", filter: 980 });
+      }
+    }
+    this.beatIndex += 1;
+    this.nextBeat = now + tempo;
   }
 
   event(event) {
@@ -94,12 +199,15 @@ export class RiftAudio {
         this.#impact(118, 48, 0.13, 0.20, 0.17);
         break;
       case "perfect":
-        this.#impact(360, 72, 0.19, 0.31, 0.20);
-        this.#tone({ from: 920, to: 1480, duration: 0.16, gain: 0.12, type: "triangle" });
+        this.#impact(420, 62, 0.18, 0.34, 0.21);
+        this.#tone({ from: 780, to: 1740, duration: 0.15, gain: 0.14, type: "triangle" });
+        this.crowdResponse(0.58);
         break;
       case "clutch":
-        this.#impact(230, 44, 0.24, 0.34, 0.23);
-        this.#tone({ from: 410, to: 1320, duration: 0.26, gain: 0.14, type: "sine" });
+        this.#impact(260, 38, 0.26, 0.38, 0.26);
+        this.#tone({ from: 360, to: 1460, duration: 0.28, gain: 0.16, type: "sine" });
+        this.#tone({ from: 72, to: 116, duration: 0.38, gain: 0.16, type: "sawtooth", delay: 0.05, filter: 620 });
+        this.crowdResponse(0.9);
         break;
       case "sling":
         this.#whoosh(180, 1120, 0.25, 0.14);
@@ -121,6 +229,9 @@ export class RiftAudio {
         this.#impact(78, 29, 0.36, 0.30, 0.24);
         this.#tone({ from: 180, to: 880, duration: 0.34, gain: 0.13, type: "triangle", filter: 1200 });
         break;
+      case "contest-break":
+        this.#tone({ from: 138, to: 510, duration: 0.18, gain: 0.075, type: "triangle", filter: 860 });
+        break;
       default:
         break;
     }
@@ -133,16 +244,40 @@ export class RiftAudio {
   matchPoint() {
     this.#tone({ from: 92, to: 61, duration: 0.55, gain: 0.21, type: "sawtooth", filter: 520 });
     this.#tone({ from: 410, to: 620, duration: 0.48, gain: 0.08, type: "sine", delay: 0.08 });
+    this.#tone({ from: 49, to: 49, duration: 1.15, gain: 0.14, type: "triangle", delay: 0.16, filter: 260 });
+  }
+
+  intro() {
+    this.#tone({ from: 42, to: 96, duration: 0.72, gain: 0.14, type: "sawtooth", filter: 640 });
+    this.#tone({ from: 260, to: 620, duration: 0.38, gain: 0.07, type: "triangle", delay: 0.52, filter: 1280 });
+  }
+
+  coreForm() {
+    this.#tone({ from: 170, to: 940, duration: 0.36, gain: 0.105, type: "sine", filter: 1520 });
+    this.#whoosh(220, 1180, 0.28, 0.07);
+  }
+
+  crowdResponse(strength = 0.5) {
+    if (!this.unlocked || !this.enabled || !this.crowdGain) return;
+    const now = this.context.currentTime;
+    const target = 0.016 + clamp(strength, 0, 1) * 0.055;
+    this.crowdGain.gain.cancelScheduledValues(now);
+    this.crowdGain.gain.setValueAtTime(Math.max(this.crowdGain.gain.value, 0.002), now);
+    this.crowdGain.gain.linearRampToValueAtTime(target, now + 0.055);
+    this.crowdGain.gain.exponentialRampToValueAtTime(0.003, now + 0.72 + strength * 0.45);
   }
 
   goal(owner) {
-    this.#impact(94, 31, 0.42, 0.42, 0.34);
-    this.#noiseBurst(0.36, 0.30, 860);
+    this.#impact(102, 28, 0.46, 0.46, 0.38);
+    this.#noiseBurst(0.40, 0.34, 780);
     const rise = owner === "player";
-    this.#tone({ from: rise ? 190 : 260, to: rise ? 940 : 74, duration: 0.46, gain: 0.17, type: "sawtooth", filter: 1180 });
+    this.#tone({ from: rise ? 190 : 280, to: rise ? 1080 : 62, duration: 0.48, gain: 0.19, type: "sawtooth", filter: 1220 });
+    this.#tone({ from: 58, to: 34, duration: 0.62, gain: 0.24, type: "sine", delay: 0.055, filter: 320 });
+    this.crowdResponse(rise ? 1 : 0.68);
   }
 
   result(victory) {
+    this.musicPhase = victory ? "VICTORY" : "DEFEAT";
     if (victory) {
       [0, 0.11, 0.23].forEach((delay, index) => this.#tone({
         from: [246, 329, 493][index],
@@ -155,6 +290,7 @@ export class RiftAudio {
     } else {
       this.#tone({ from: 220, to: 58, duration: 0.72, gain: 0.18, type: "sawtooth", filter: 520 });
     }
+    this.crowdResponse(victory ? 1 : 0.32);
   }
 
   #tone({ from, to, duration, gain, type = "sine", delay = 0, filter = 1600 }) {

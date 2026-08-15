@@ -1,9 +1,13 @@
 {
   "agent": "CODEX",
   "game": "RIFTBALL",
-  "build": "RIFT-20260815.3",
-  "source_commit": "d4cc981f5719052be273c8ed78feb7007594c0b1",
-  "physics": "tether",
+  "build": "RIFT-20260815.4",
+  "source_commit": "59afc0272f7b840e3f63177623abdee67abe10f2",
+  "source_tree": "ebcbb47626c4dded208bc8a027d3f4d0f6755099",
+  "physics": "drive",
+  "camera": "broadcast",
   "runtime": "canvas2d-web-audio",
+  "release_bytes": 158537,
+  "combined_gzip_bytes": 37112,
   "pck": null
 }
