@@ -1,22 +1,25 @@
 import { RiftAudio } from "./audio.mjs";
 import { BOT_STATES, RiftBot } from "./bot.mjs";
 import { CAMERA_CANDIDATES, CAMERA_MODES, CameraRig } from "./camera.mjs";
+import { DualThumbInput, POWER_DEFINITIONS } from "./input.mjs";
 import {
   ARENA,
   CANDIDATE_CONFIGS,
   PHYSICS_MODES,
   REFERENCE_HEIGHT,
   REFERENCE_WIDTH,
+  WORLD_HEIGHT,
+  WORLD_WIDTH,
   RiftPhysics,
 } from "./physics.mjs";
-import { COLORS, RiftRenderer } from "./renderer.mjs?v=RIFT-20260815.4-r2";
+import { COLORS, RiftRenderer } from "./renderer.mjs?v=RIFT-20260815.5-r1";
 import { RiftTelemetry, telemetryHealth } from "./telemetry.mjs";
 
-const BUILD_ID = "RIFT-20260815.4";
+const BUILD_ID = "RIFT-20260815.5";
 const BUILD_IDENTITY = `CODEX • RIFTBALL • ${BUILD_ID}`;
 const FIXED_STEP = 1 / 120;
 const WIN_SCORE = 3;
-const ONBOARDING_KEY = "riftball-onboarding-v4";
+const ONBOARDING_KEY = "riftball-landscape-onboarding-v1";
 
 const GAME_STATES = Object.freeze({
   MENU: "MENU",
@@ -33,11 +36,21 @@ const app = document.getElementById("app");
 const boot = document.getElementById("boot");
 const menu = document.getElementById("menu");
 const hud = document.getElementById("hud");
+const controls = document.getElementById("controls");
 const results = document.getElementById("results");
 const playButton = document.getElementById("play-button");
 const replayButton = document.getElementById("replay-button");
 const homeButton = document.getElementById("home-button");
 const soundButton = document.getElementById("sound-button");
+const movePad = document.getElementById("move-pad");
+const moveStick = document.getElementById("move-stick");
+const actionCluster = document.getElementById("action-cluster");
+const actionButton = document.getElementById("action-button");
+const actionIcon = document.getElementById("action-icon");
+const actionLabel = document.getElementById("action-label");
+const armedPowerReadout = document.getElementById("armed-power");
+const fluxValue = document.getElementById("flux-value");
+const powerOptions = [...document.querySelectorAll(".power-option")];
 const playerScoreLabel = document.getElementById("player-score");
 const botScoreLabel = document.getElementById("bot-score");
 const playerPips = document.getElementById("player-pips");
@@ -78,17 +91,21 @@ class RiftGame {
     const requestedPhysics = search.get("physics");
     const requestedCamera = search.get("camera");
     this.physicsMode = CANDIDATE_CONFIGS[requestedPhysics] ? requestedPhysics : PHYSICS_MODES.DRIVE;
-    this.cameraMode = CAMERA_CANDIDATES[requestedCamera] ? requestedCamera : CAMERA_MODES.BROADCAST;
+    this.cameraMode = CAMERA_CANDIDATES[requestedCamera] ? requestedCamera : CAMERA_MODES.ARENA;
     this.physics = new RiftPhysics({ mode: this.physicsMode, seed: 15473 });
     this.bot = new RiftBot(8819, "wraith");
     this.audio = new RiftAudio();
     this.camera = new CameraRig(this.cameraMode);
     this.renderer = new RiftRenderer(canvas, context, this.camera);
     this.telemetry = new RiftTelemetry({ build: BUILD_ID, physics: this.physicsMode, camera: this.cameraMode });
+    this.input = new DualThumbInput({ joystickRadius: 46, radialDeadZone: 34, holdDelay: 112 });
 
     this.state = GAME_STATES.MENU;
     this.scores = { player: 0, bot: 0 };
     this.stats = this.#freshStats();
+    this.flux = { player: 100, bot: 100 };
+    this.armedPower = { player: null, bot: null };
+    this.lastFluxDisplay = -1;
     this.matchStartedAt = 0;
     this.matchIntro = 0;
     this.introDuration = 0;
@@ -100,8 +117,6 @@ class RiftGame {
     this.lastFrame = performance.now();
     this.menuTime = 0;
     this.visualTime = 0;
-    this.pointerId = null;
-    this.lastPointerWorld = null;
     this.soundEnabled = true;
     this.statusExpires = 0;
     this.hitStop = 0;
@@ -121,17 +136,18 @@ class RiftGame {
     this.matchPointAnnounced = false;
     this.lastBotState = BOT_STATES.PROBE;
     this.devicePixelRatio = 1;
+    this.radialTimer = null;
     this.riderFx = {
-      player: { recoil: 0, flash: 0, celebrate: 0 },
-      bot: { recoil: 0, flash: 0, celebrate: 0 },
+      player: { recoil: 0, flash: 0, celebrate: 0, power: 0 },
+      bot: { recoil: 0, flash: 0, celebrate: 0, power: 0 },
     };
     this.reactorFx = {
       player: { impact: 0, collapse: 0 },
       bot: { impact: 0, collapse: 0 },
     };
     this.danger = { player: 0, bot: 0 };
-    this.onboardingStage = sessionStorage.getItem(ONBOARDING_KEY) === "done" ? "done" : "drag";
-    this.onboardingDrag = 0;
+    this.onboardingStage = sessionStorage.getItem(ONBOARDING_KEY) === "done" ? "done" : "move";
+    this.onboardingMoveSeconds = 0;
     this.lastTelemetry = null;
     this.qaEnabled = search.get("qa") === "1";
     this.qaScene = this.qaEnabled ? search.get("scene") : null;
@@ -149,6 +165,9 @@ class RiftGame {
       perfect: 0,
       clutch: 0,
       slings: 0,
+      strikes: 0,
+      powers: 0,
+      whiffs: 0,
       rebounds: 0,
       maxChain: 0,
       longestDuel: 0,
@@ -156,43 +175,94 @@ class RiftGame {
     };
   }
 
+  #isInputLive() {
+    return this.state === GAME_STATES.ROUND_INTRO || this.state === GAME_STATES.PLAYING;
+  }
+
   #wireInput() {
     addEventListener("resize", () => this.resize(), { passive: true });
     addEventListener("orientationchange", () => this.resize(), { passive: true });
+    addEventListener("blur", () => this.#cancelInput(), { passive: true });
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) return;
-      this.pointerId = null;
-      this.lastPointerWorld = null;
-      const node = this.physics.nodes.player;
-      this.physics.setNodeTarget("player", node.x, node.y);
-      this.accumulator = 0;
+      if (document.hidden) this.#cancelInput();
     });
 
-    canvas.addEventListener("pointerdown", (event) => {
-      if (![GAME_STATES.ROUND_INTRO, GAME_STATES.PLAYING].includes(this.state) || this.pointerId !== null) return;
+    movePad.addEventListener("pointerdown", (event) => {
+      if (!this.#isInputLive()) return;
       event.preventDefault();
-      this.pointerId = event.pointerId;
-      canvas.setPointerCapture?.(event.pointerId);
-      this.lastPointerWorld = null;
-      this.#movePlayerToPointer(event);
+      const rect = movePad.getBoundingClientRect();
+      if (!this.input.beginMove(event.pointerId, rect.left + rect.width * 0.5, rect.top + rect.height * 0.5, event.clientX, event.clientY)) return;
+      movePad.setPointerCapture?.(event.pointerId);
+      movePad.classList.add("engaged");
+      this.telemetry.control("joystick-start");
+      this.#updateMoveInput(event);
       this.audio.unlock();
     });
-    canvas.addEventListener("pointermove", (event) => {
-      if (event.pointerId !== this.pointerId) return;
+    movePad.addEventListener("pointermove", (event) => {
+      if (event.pointerId !== this.input.move.pointerId) return;
       event.preventDefault();
-      this.#movePlayerToPointer(event);
+      this.#updateMoveInput(event);
     });
-    const releasePointer = (event) => {
-      if (event.pointerId !== this.pointerId) return;
-      this.pointerId = null;
-      this.lastPointerWorld = null;
+    const releaseMove = (event) => {
+      if (!this.input.endMove(event.pointerId)) return;
+      this.physics.setNodeDrive("player", 0, 0, 0);
+      movePad.classList.remove("engaged");
+      moveStick.style.transform = "translate(-50%, -50%)";
     };
-    canvas.addEventListener("pointerup", releasePointer);
-    canvas.addEventListener("pointercancel", releasePointer);
-    canvas.addEventListener("lostpointercapture", () => {
-      this.pointerId = null;
-      this.lastPointerWorld = null;
+    movePad.addEventListener("pointerup", releaseMove);
+    movePad.addEventListener("pointercancel", releaseMove);
+    movePad.addEventListener("lostpointercapture", (event) => {
+      if (event.pointerId === this.input.move.pointerId) releaseMove(event);
     });
+
+    actionButton.addEventListener("pointerdown", (event) => {
+      if (!this.#isInputLive()) return;
+      event.preventDefault();
+      if (!this.input.beginAction(event.pointerId, performance.now())) return;
+      actionButton.setPointerCapture?.(event.pointerId);
+      actionButton.classList.add("pressed");
+      this.telemetry.control("action-press");
+      this.audio.unlock();
+      clearTimeout(this.radialTimer);
+      this.radialTimer = setTimeout(() => {
+        if (this.input.openRadial(event.pointerId)) {
+          this.telemetry.control("radial-open");
+          this.#renderRadialState();
+          this.audio.radial?.();
+        }
+      }, this.input.holdDelay);
+    });
+    actionButton.addEventListener("pointermove", (event) => {
+      if (event.pointerId !== this.input.action.pointerId) return;
+      event.preventDefault();
+      const rect = actionButton.getBoundingClientRect();
+      const wasOpen = this.input.action.radialOpen;
+      this.input.updateAction(event.pointerId, event.clientX, event.clientY, rect.left + rect.width * 0.5, rect.top + rect.height * 0.5, performance.now());
+      if (!wasOpen && this.input.action.radialOpen) this.telemetry.control("radial-open");
+      this.#renderRadialState();
+    });
+    const releaseAction = (event) => {
+      if (event.pointerId !== this.input.action.pointerId) return;
+      event.preventDefault();
+      clearTimeout(this.radialTimer);
+      const rect = actionButton.getBoundingClientRect();
+      this.input.updateAction(event.pointerId, event.clientX, event.clientY, rect.left + rect.width * 0.5, rect.top + rect.height * 0.5, performance.now());
+      const result = this.input.endAction(event.pointerId, performance.now());
+      this.#closeRadialUI();
+      if (!result) return;
+      if (result.type === "power") this.#armPower("player", result.power);
+      else if (result.type === "center") {
+        this.telemetry.control("center-release");
+        this.#performStrike("player", null, { preserveArmed: true });
+      }
+      else this.#performStrike("player", this.armedPower.player);
+    };
+    actionButton.addEventListener("pointerup", releaseAction);
+    actionButton.addEventListener("pointercancel", (event) => this.#cancelAction(event.pointerId));
+    actionButton.addEventListener("lostpointercapture", (event) => {
+      if (event.pointerId === this.input.action.pointerId) this.#cancelAction(event.pointerId);
+    });
+    actionButton.addEventListener("click", (event) => event.preventDefault());
 
     playButton.addEventListener("click", async () => {
       await this.audio.unlock();
@@ -220,19 +290,127 @@ class RiftGame {
     });
   }
 
-  #movePlayerToPointer(event) {
-    const rect = canvas.getBoundingClientRect();
-    const screenX = (event.clientX - rect.left) * REFERENCE_WIDTH / Math.max(rect.width, 1);
-    const screenY = (event.clientY - rect.top) * REFERENCE_HEIGHT / Math.max(rect.height, 1);
-    const world = this.camera.unproject(screenX, screenY);
-    if (this.lastPointerWorld) this.onboardingDrag += Math.hypot(world.x - this.lastPointerWorld.x, world.y - this.lastPointerWorld.y);
-    this.lastPointerWorld = world;
-    const riderTarget = { x: world.x, y: world.y - 30 };
-    this.physics.setNodeTarget("player", riderTarget.x, riderTarget.y);
-    this.telemetry.touch(riderTarget.x, riderTarget.y);
-    if (this.onboardingStage === "drag" && this.onboardingDrag > 34) {
-      this.onboardingStage = "pull";
-      this.#updateOnboardingUI();
+  #updateMoveInput(event) {
+    const output = this.input.updateMove(event.pointerId, event.clientX, event.clientY);
+    if (!output) return;
+    moveStick.style.transform = `translate(calc(-50% + ${output.pixelX}px), calc(-50% + ${output.pixelY}px))`;
+    const worldDrive = this.camera.screenDriveToWorld(output.x, output.y);
+    this.physics.setNodeDrive("player", worldDrive.x, worldDrive.y, output.magnitude);
+    const node = this.physics.nodes.player;
+    this.telemetry.touch(node.x + worldDrive.x * output.magnitude * 28, node.y + worldDrive.y * output.magnitude * 28);
+  }
+
+  #cancelAction(pointerId = this.input.action.pointerId) {
+    clearTimeout(this.radialTimer);
+    if (pointerId !== null && pointerId === this.input.action.pointerId) this.telemetry.control("action-cancel");
+    this.input.cancelAction(pointerId);
+    this.#closeRadialUI();
+  }
+
+  #cancelInput() {
+    clearTimeout(this.radialTimer);
+    if (this.input.action.pointerId !== null) this.telemetry.control("action-cancel");
+    this.input.cancelAll();
+    this.physics.setNodeDrive("player", 0, 0, 0);
+    movePad.classList.remove("engaged");
+    moveStick.style.transform = "translate(-50%, -50%)";
+    this.#closeRadialUI();
+    this.accumulator = 0;
+  }
+
+  #renderRadialState() {
+    const radialOpen = this.input.action.radialOpen;
+    actionCluster.classList.toggle("open", radialOpen);
+    if (radialOpen && this.onboardingStage === "powers") this.#updateOnboardingUI();
+    for (const option of powerOptions) {
+      const definition = POWER_DEFINITIONS[option.dataset.power];
+      option.classList.toggle("selected", radialOpen && this.input.action.selectedPower === definition.id);
+      option.classList.toggle("locked", this.flux.player + 0.01 < definition.cost);
+    }
+    if (radialOpen) {
+      actionLabel.textContent = this.input.action.selectedPower
+        ? POWER_DEFINITIONS[this.input.action.selectedPower].label
+        : "FLICK";
+      actionIcon.textContent = this.input.action.selectedPower
+        ? POWER_DEFINITIONS[this.input.action.selectedPower].icon
+        : "+";
+    }
+  }
+
+  #closeRadialUI() {
+    actionButton.classList.remove("pressed");
+    actionCluster.classList.remove("open");
+    for (const option of powerOptions) option.classList.remove("selected");
+    this.#updatePowerUI(true);
+  }
+
+  #armPower(owner, power) {
+    const definition = POWER_DEFINITIONS[power];
+    if (!definition) return false;
+    if (this.flux[owner] + 0.01 < definition.cost) {
+      if (owner === "player") this.announce("LOW FLUX", 0.42);
+      this.audio.denied?.();
+      return false;
+    }
+    this.armedPower[owner] = power;
+    if (owner === "player") {
+      this.telemetry.control("power-arm", power);
+      this.announce(`${definition.label} ARMED`, 0.52);
+      this.audio.powerArm?.(power);
+      if (this.onboardingStage === "powers") {
+        this.onboardingStage = "done";
+        sessionStorage.setItem(ONBOARDING_KEY, "done");
+        this.#updateOnboardingUI();
+      }
+      this.#updatePowerUI(true);
+    }
+    return true;
+  }
+
+  #performStrike(owner, requestedPower = null, { preserveArmed = false } = {}) {
+    let power = requestedPower;
+    const definition = power ? POWER_DEFINITIONS[power] : null;
+    if (definition && this.flux[owner] + 0.01 < definition.cost) power = null;
+    if (power) {
+      this.flux[owner] = Math.max(0, this.flux[owner] - POWER_DEFINITIONS[power].cost);
+      this.armedPower[owner] = null;
+    } else if (!preserveArmed && requestedPower) {
+      this.armedPower[owner] = null;
+    }
+    const fired = this.physics.requestStrike(owner, power);
+    if (!fired) return false;
+    this.riderFx[owner].recoil = Math.max(this.riderFx[owner].recoil, power ? 0.58 : 0.34);
+    if (owner === "player") {
+      this.#updatePowerUI(true);
+      if (power) this.announce(POWER_DEFINITIONS[power].label, 0.34);
+    }
+    return true;
+  }
+
+  #updatePowerUI(force = false) {
+    const roundedFlux = Math.round(this.flux.player);
+    if (!force && roundedFlux === this.lastFluxDisplay) return;
+    this.lastFluxDisplay = roundedFlux;
+    actionCluster.style.setProperty("--flux", String(roundedFlux));
+    fluxValue.textContent = String(roundedFlux);
+    const armed = this.armedPower.player ? POWER_DEFINITIONS[this.armedPower.player] : null;
+    actionButton.classList.toggle("armed", Boolean(armed));
+    if (armed) {
+      actionButton.style.setProperty("--power-color", armed.color);
+      actionIcon.textContent = armed.icon;
+      actionLabel.textContent = armed.label;
+      actionButton.querySelector("small").textContent = "TAP";
+      armedPowerReadout.querySelector("span").textContent = "ARMED";
+    } else {
+      actionButton.style.removeProperty("--power-color");
+      actionIcon.textContent = "◆";
+      actionLabel.textContent = "STRIKE";
+      actionButton.querySelector("small").textContent = "TAP";
+      armedPowerReadout.querySelector("span").textContent = "FLUX";
+    }
+    for (const option of powerOptions) {
+      const definition = POWER_DEFINITIONS[option.dataset.power];
+      option.classList.toggle("locked", this.flux.player + 0.01 < definition.cost);
     }
   }
 
@@ -245,8 +423,7 @@ class RiftGame {
 
   showMenu() {
     this.state = GAME_STATES.MENU;
-    this.pointerId = null;
-    this.lastPointerWorld = null;
+    this.#cancelInput();
     this.trail.length = 0;
     this.particles.length = 0;
     this.shockwaves.length = 0;
@@ -254,6 +431,7 @@ class RiftGame {
     this.physics.setScoreContext(0, false);
     menu.hidden = false;
     hud.hidden = true;
+    controls.hidden = true;
     results.hidden = true;
     onboardingCall.hidden = true;
     matchPointFlag.hidden = true;
@@ -263,6 +441,10 @@ class RiftGame {
     this.scores.player = 0;
     this.scores.bot = 0;
     this.stats = this.#freshStats();
+    this.flux.player = 100;
+    this.flux.bot = 100;
+    this.armedPower.player = null;
+    this.armedPower.bot = null;
     this.matchStartedAt = performance.now();
     this.railsAnnounced = false;
     this.matchPointAnnounced = false;
@@ -278,25 +460,27 @@ class RiftGame {
     this.physics.core.vy = 0;
     this.physics.setScoreContext(0, false);
     this.bot.reset();
-    this.telemetry.startMatch({ rematch });
-    this.onboardingDrag = 0;
+    this.telemetry.startMatch({ rematch, control: "dual-thumb-radial" });
+    this.onboardingMoveSeconds = 0;
     this.introLong = !rematch;
-    this.introDuration = rematch ? 0.42 : 2.24;
+    this.introDuration = rematch ? 0.36 : 1.86;
     this.matchIntro = this.introDuration;
     this.introCoreCue = false;
     this.state = GAME_STATES.MATCH_INTRO;
     menu.hidden = true;
     results.hidden = true;
     hud.hidden = false;
+    controls.hidden = false;
     this.updateScoreUI();
+    this.#updatePowerUI(true);
     this.#updateOnboardingUI();
     this.audio.intro();
-    this.announce(rematch ? "RIFT LIVE" : "RIDER LINKED", rematch ? 0.34 : 0.72);
+    this.announce(rematch ? "RIFT LIVE" : "TWO THUMBS LINKED", rematch ? 0.32 : 0.66);
   }
 
   prepareRound(direction, fast = false) {
     this.state = GAME_STATES.ROUND_INTRO;
-    this.roundIntro = fast ? 0.30 : 0.50;
+    this.roundIntro = fast ? 0.28 : 0.46;
     this.goalTimer = 0;
     this.goalOwner = null;
     this.roundLaunchDirection = direction;
@@ -305,15 +489,16 @@ class RiftGame {
     this.physics.core.vx = 0;
     this.physics.core.vy = 0;
     this.bot.reset();
+    this.#cancelInput();
     const totalGoals = this.scores.player + this.scores.bot;
     const matchPoint = this.scores.player === 2 || this.scores.bot === 2;
     const finalPoint = this.scores.player === 2 && this.scores.bot === 2;
     this.physics.setScoreContext(totalGoals, matchPoint);
     matchPointFlag.hidden = !matchPoint;
     matchPointLabel.textContent = finalPoint ? "FINAL POINT" : "MATCH POINT";
-    if (finalPoint) this.announce("FINAL RIFT", 1.0);
-    else if (matchPoint) this.announce("MATCH POINT", 0.9);
-    else this.announce(totalGoals === 0 ? "BREAK THEIR REACTOR" : "CORE RESET", fast ? 0.34 : 0.54);
+    if (finalPoint) this.announce("FINAL RIFT", 0.92);
+    else if (matchPoint) this.announce("MATCH POINT", 0.82);
+    else this.announce(totalGoals === 0 ? "BREAK THEIR REACTOR" : "CORE RESET", fast ? 0.30 : 0.48);
   }
 
   frame(time) {
@@ -341,7 +526,7 @@ class RiftGame {
     if (this.state === GAME_STATES.MATCH_INTRO) {
       this.matchIntro -= dt;
       const progress = 1 - this.matchIntro / Math.max(this.introDuration, 0.001);
-      if (!this.introCoreCue && progress > (this.introLong ? 0.46 : 0.20)) {
+      if (!this.introCoreCue && progress > (this.introLong ? 0.42 : 0.18)) {
         this.introCoreCue = true;
         this.audio.coreForm();
       }
@@ -352,25 +537,41 @@ class RiftGame {
     if (this.state === GAME_STATES.ROUND_INTRO) {
       this.roundIntro -= dt;
       this.physics.step(dt);
-      this.physics.core.x = 195;
-      this.physics.core.y = 422;
+      this.physics.core.x = WORLD_WIDTH * 0.5;
+      this.physics.core.y = WORLD_HEIGHT * 0.5;
       this.physics.core.vx = 0;
       this.physics.core.vy = 0;
       if (this.roundIntro <= 0) {
         this.state = GAME_STATES.PLAYING;
-        this.physics.launch(this.roundLaunchDirection, 188);
-        this.announce("CORE LIVE", 0.42);
+        this.physics.launch(this.roundLaunchDirection, 178);
+        this.announce("CORE LIVE", 0.38);
       }
       return;
     }
 
     if (this.state === GAME_STATES.PLAYING) {
+      this.flux.player = Math.min(100, this.flux.player + dt * 3.4);
+      this.flux.bot = Math.min(100, this.flux.bot + dt * 3.1);
+      this.#updatePowerUI();
+      if (this.input.move.magnitude > 0.24 && this.onboardingStage === "move") {
+        this.onboardingMoveSeconds += dt;
+        if (this.onboardingMoveSeconds >= 0.42) {
+          this.onboardingStage = "strike";
+          this.#updateOnboardingUI();
+        }
+      }
+
       const matchPoint = this.scores.player === 2 || this.scores.bot === 2;
-      this.lastBotState = this.bot.update(dt, this.physics, { scores: this.scores, matchPoint });
+      this.lastBotState = this.bot.update(dt, this.physics, { scores: this.scores, matchPoint, botFlux: this.flux.bot });
+      const botAction = this.bot.consumeAction();
+      if (botAction) {
+        if (botAction.power) this.#armPower("bot", botAction.power);
+        this.#performStrike("bot", this.armedPower.bot);
+      }
+
       const events = this.physics.step(dt);
       this.telemetry.sample(dt, this.physics);
       this.processPhysicsEvents(events);
-      this.#updateOnboardingFromPhysics();
       this.trailSampleTimer -= dt;
       if (this.trailSampleTimer <= 0) {
         this.trailSampleTimer = 1 / 60;
@@ -382,8 +583,8 @@ class RiftGame {
         });
         if (this.trail.length > 40) this.trail.pop();
       }
-      duelMeter.style.width = `${clamp(this.physics.pressure * 100, 0, 100)}%`;
-      const territory = clamp((1 - this.physics.core.y / REFERENCE_HEIGHT) * 76 + 12, 12, 88);
+      duelMeter.style.height = `${clamp(this.physics.pressure * 100, 0, 100)}%`;
+      const territory = clamp((1 - this.physics.core.y / WORLD_HEIGHT) * 76 + 12, 12, 88);
       territoryMarker.style.left = `${territory}%`;
       return;
     }
@@ -397,22 +598,15 @@ class RiftGame {
     }
   }
 
-  #updateOnboardingFromPhysics() {
-    if (this.onboardingStage === "pull" && this.physics.nodes.player.influence > 0.20) {
-      this.onboardingStage = "await-intercept";
-      this.#updateOnboardingUI();
-    }
-  }
-
   #updateOnboardingUI() {
-    if (![GAME_STATES.ROUND_INTRO, GAME_STATES.PLAYING, GAME_STATES.MATCH_INTRO].includes(this.state) || this.onboardingStage === "done" || this.onboardingStage === "await-intercept") {
+    if (![GAME_STATES.MATCH_INTRO, GAME_STATES.ROUND_INTRO, GAME_STATES.PLAYING].includes(this.state) || this.onboardingStage === "done") {
       onboardingCall.hidden = true;
       return;
     }
     const messages = {
-      drag: "DRAG TO MOVE",
-      pull: "PULL THE CORE",
-      sling: "MOVE FAST + RELEASE → SLING",
+      move: "LEFT THUMB • MOVE",
+      strike: "RIGHT THUMB • TAP TO STRIKE",
+      powers: "HOLD + FLICK • 4 POWERS",
     };
     onboardingLabel.textContent = messages[this.onboardingStage] || "";
     onboardingCall.hidden = !messages[this.onboardingStage];
@@ -423,58 +617,76 @@ class RiftGame {
       this.telemetry.event(event);
       if (event.type === "field") continue;
       this.audio.event(event);
-      if (event.type === "surge") {
-        this.announce("RIFT UNSTABLE", 0.72);
+
+      if (event.type === "strike-start") {
+        const fx = this.riderFx[event.owner];
+        fx.recoil = Math.max(fx.recoil, event.power ? 0.62 : 0.34);
+        if (event.owner === "player" && this.onboardingStage === "strike") {
+          this.onboardingStage = "powers";
+          this.#updateOnboardingUI();
+        }
+      } else if (event.type === "strike") {
+        this.spawnStrike(event);
+        const fx = this.riderFx[event.owner];
+        fx.flash = 1;
+        fx.power = event.power ? 1 : 0.35;
+        this.shake = Math.max(this.shake, event.power ? 7.5 : event.sweetSpot ? 5 : 3.2);
+        this.hitStop = Math.max(this.hitStop, event.power ? 0.030 : event.sweetSpot ? 0.020 : 0.013);
+        this.crowdPulse = Math.max(this.crowdPulse, event.power ? 0.74 : 0.36);
+        if (event.owner === "player") {
+          this.stats.strikes += 1;
+          if (event.power) this.stats.powers += 1;
+          this.flux.player = Math.min(100, this.flux.player + (event.sweetSpot ? 8 : 4));
+          if (event.power) this.announce(`${POWER_DEFINITIONS[event.power].label} HIT`, 0.46);
+          else if (event.sweetSpot) this.announce("CLEAN STRIKE", 0.34);
+        }
+      } else if (event.type === "strike-whiff") {
+        if (event.owner === "player") this.stats.whiffs += 1;
+      } else if (event.type === "surge") {
+        this.announce("RIFT UNSTABLE", 0.70);
         this.flash = { alpha: 0.10, color: COLORS.chalk };
         this.crowdPulse = Math.max(this.crowdPulse, 0.52);
         this.shockwaves.push(
-          { x: 195, y: ARENA.topReactorY, radius: 42, target: 120, life: 0.34, maxLife: 0.34, color: COLORS.violet, dashed: true },
-          { x: 195, y: ARENA.bottomReactorY, radius: 42, target: 120, life: 0.34, maxLife: 0.34, color: COLORS.amber, dashed: true },
+          { x: WORLD_WIDTH * 0.5, y: ARENA.topReactorY, radius: 42, target: 120, life: 0.34, maxLife: 0.34, color: COLORS.violet, dashed: true },
+          { x: WORLD_WIDTH * 0.5, y: ARENA.bottomReactorY, radius: 42, target: 120, life: 0.34, maxLife: 0.34, color: COLORS.amber, dashed: true },
         );
       } else if (event.type === "break") {
-        this.announce("RIFT BREAK", 0.88);
+        this.announce("RIFT BREAK", 0.86);
         this.shake = Math.max(this.shake, 6.5);
         this.flash = { alpha: 0.18, color: COLORS.danger };
         this.crowdPulse = 0.82;
-        this.shockwaves.push({ x: 195, y: 422, radius: 38, target: 215, life: 0.48, maxLife: 0.48, color: COLORS.chalk, dashed: true });
+        this.shockwaves.push({ x: WORLD_WIDTH * 0.5, y: WORLD_HEIGHT * 0.5, radius: 38, target: 215, life: 0.48, maxLife: 0.48, color: COLORS.chalk, dashed: true });
       } else if (event.type === "contest-break") {
         this.shockwaves.push({ x: this.physics.core.x, y: this.physics.core.y, radius: 14, target: 58, life: 0.18, maxLife: 0.18, color: COLORS.cyan, dashed: true });
       } else if (["intercept", "perfect", "clutch"].includes(event.type)) {
         this.spawnIntercept(event);
-        const ownerFx = this.riderFx[event.owner === "player" ? "player" : "bot"];
+        const ownerFx = this.riderFx[event.owner];
         ownerFx.recoil = 1;
         ownerFx.flash = 1;
         this.shake = Math.max(this.shake, event.type === "clutch" ? 9 : event.type === "perfect" ? 5.5 : 2.4);
         this.stats.maxChain = Math.max(this.stats.maxChain, event.chain || 0);
         if (event.owner === "player" && event.defensive) this.stats.saves += 1;
         if (event.owner === "player" && event.perfect) this.stats.perfect += 1;
-        if (event.owner === "player" && this.onboardingStage === "await-intercept") {
-          this.onboardingStage = "sling";
-          this.#updateOnboardingUI();
-        }
         if (event.type === "perfect") {
           this.hitStop = Math.max(this.hitStop, 0.026);
           this.crowdPulse = Math.max(this.crowdPulse, 0.70);
-          if (event.owner === "player") this.announce("PERFECT INTERCEPT", 0.60);
+          if (event.owner === "player") {
+            this.flux.player = Math.min(100, this.flux.player + 12);
+            this.announce("PERFECT INTERCEPT", 0.58);
+          }
         }
         if (event.owner === "player" && event.clutch) {
           this.stats.clutch += 1;
+          this.flux.player = Math.min(100, this.flux.player + 18);
           this.hitStop = Math.max(this.hitStop, 0.042);
           this.crowdPulse = 1;
-          this.announce("CLUTCH REVERSAL", 0.82);
+          this.announce("CLUTCH REVERSAL", 0.80);
           this.flash = { alpha: 0.24, color: COLORS.amberHot };
         }
       } else if (event.type === "sling") {
-        if (event.owner === "player") {
-          this.stats.slings += 1;
-          if (this.onboardingStage === "sling") {
-            this.onboardingStage = "done";
-            sessionStorage.setItem(ONBOARDING_KEY, "done");
-            this.#updateOnboardingUI();
-          }
-        }
+        if (event.owner === "player") this.stats.slings += 1;
         this.spawnSling(event);
-        if (event.owner === "player" && event.charge > 0.64) this.announce("SLING", 0.44);
+        if (event.owner === "player" && event.charge > 0.64) this.announce("GRAV SLING", 0.40);
       } else if (event.type === "rebound") {
         this.stats.rebounds += 1;
         this.spawnRebound(event);
@@ -488,23 +700,24 @@ class RiftGame {
     if (this.state !== GAME_STATES.PLAYING) return;
     this.goalOwner = event.owner;
     this.scores[event.owner] += 1;
-    const scoringFx = this.riderFx[event.owner === "player" ? "player" : "bot"];
+    const scoringFx = this.riderFx[event.owner];
     const targetReactor = event.owner === "player" ? this.reactorFx.bot : this.reactorFx.player;
     scoringFx.celebrate = 1;
     targetReactor.impact = 1;
     targetReactor.collapse = this.scores[event.owner] >= WIN_SCORE ? 1 : 0.56;
     if (event.owner === "player") {
       this.stats.goals += 1;
-      this.announce(this.scores.player >= WIN_SCORE ? "REACTOR DESTROYED" : "REACTOR BREACH", 1.02);
+      this.flux.player = Math.min(100, this.flux.player + 16);
+      this.announce(this.scores.player >= WIN_SCORE ? "REACTOR DESTROYED" : "REACTOR BREACH", 0.98);
     } else {
-      this.announce(this.scores.bot >= WIN_SCORE ? "OUR REACTOR DESTROYED" : "REACTOR HIT", 1.02);
+      this.announce(this.scores.bot >= WIN_SCORE ? "OUR REACTOR DESTROYED" : "REACTOR HIT", 0.98);
     }
     this.stats.longestDuel = Math.max(this.stats.longestDuel, event.roundTime);
     this.stats.duelSeconds.push(event.roundTime);
     this.updateScoreUI();
     this.state = GAME_STATES.GOAL;
     this.pendingResult = this.scores.player >= WIN_SCORE || this.scores.bot >= WIN_SCORE;
-    this.goalTimer = this.pendingResult ? 1.24 : 0.94;
+    this.goalTimer = this.pendingResult ? 1.18 : 0.88;
     this.shake = 17;
     this.crowdPulse = 1;
     this.flash = { alpha: 0.46, color: event.owner === "player" ? COLORS.amber : COLORS.violet };
@@ -516,8 +729,8 @@ class RiftGame {
     if (!this.pendingResult && totalGoals >= 2 && !isMatchPoint && !this.railsAnnounced) {
       this.railsAnnounced = true;
       setTimeout(() => {
-        if (this.state !== GAME_STATES.RESULTS) this.announce("RIFT FINS ONLINE", 0.78);
-      }, 360);
+        if (this.state !== GAME_STATES.RESULTS) this.announce("RIFT FINS ONLINE", 0.72);
+      }, 320);
     }
     if (!this.pendingResult && isMatchPoint && !this.matchPointAnnounced) {
       this.matchPointAnnounced = true;
@@ -540,7 +753,9 @@ class RiftGame {
 
   showResults() {
     this.state = GAME_STATES.RESULTS;
+    this.#cancelInput();
     hud.hidden = true;
+    controls.hidden = true;
     results.hidden = false;
     onboardingCall.hidden = true;
     matchPointFlag.hidden = true;
@@ -552,10 +767,10 @@ class RiftGame {
     resultScore.replaceChildren(document.createTextNode(`${this.scores.player}`), separator, document.createTextNode(`${this.scores.bot}`));
     const matchSeconds = (performance.now() - this.matchStartedAt) / 1000;
     const values = [
+      [this.stats.strikes, "STRIKES"],
+      [this.stats.powers, "POWER HITS"],
       [this.stats.perfect, "PERFECT"],
       [this.stats.clutch, "CLUTCH SAVES"],
-      [this.stats.slings, "SLINGS"],
-      [this.stats.saves, "SAVES"],
       [`${this.stats.longestDuel.toFixed(1)}s`, "LONGEST DUEL"],
       [formatSeconds(matchSeconds), "MATCH TIME"],
     ];
@@ -574,27 +789,42 @@ class RiftGame {
     this.spawnResult(victory);
   }
 
+  spawnStrike(event) {
+    const core = this.physics.core;
+    const definition = event.power ? POWER_DEFINITIONS[event.power] : null;
+    const color = definition?.color || (event.owner === "player" ? COLORS.amberHot : COLORS.violetHot);
+    const count = event.power ? 25 : event.sweetSpot ? 17 : 11;
+    const heading = Math.atan2(core.vy, core.vx);
+    for (let index = 0; index < count; index += 1) {
+      const spread = (Math.random() - 0.5) * (event.power === "burst" ? 2.0 : 0.9);
+      const angle = heading + Math.PI + spread;
+      const speed = 95 + Math.random() * (event.power ? 250 : 150);
+      this.particles.push({
+        x: core.x,
+        y: core.y,
+        z: 13,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0.24 + Math.random() * 0.23,
+        maxLife: 0.48,
+        color: index % 4 === 0 ? COLORS.chalk : color,
+        size: 1.4 + Math.random() * (event.power ? 3.5 : 2.4),
+        shape: index % 3 === 0 ? "shard" : "spark",
+      });
+    }
+    this.shockwaves.push({ x: core.x, y: core.y, radius: 15, target: event.power ? 104 : 70, life: event.power ? 0.29 : 0.21, maxLife: event.power ? 0.29 : 0.21, color, dashed: Boolean(event.power) });
+  }
+
   spawnIntercept(event) {
     const core = this.physics.core;
     const color = event.owner === "player" ? COLORS.amber : COLORS.violet;
     const count = event.type === "clutch" ? 26 : event.type === "perfect" ? 18 : 10;
-    const direction = Math.atan2(this.physics.core.vy, this.physics.core.vx);
+    const direction = Math.atan2(core.vy, core.vx);
     for (let index = 0; index < count; index += 1) {
       const fan = (index / Math.max(count - 1, 1) - 0.5) * Math.PI * (event.type === "clutch" ? 1.5 : 1.1);
       const angle = direction + fan + (Math.random() - 0.5) * 0.18;
       const speed = (event.type === "clutch" ? 205 : 135) * (0.55 + Math.random() * 0.65);
-      this.particles.push({
-        x: core.x,
-        y: core.y,
-        z: 12,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 0.30 + Math.random() * 0.20,
-        maxLife: 0.50,
-        color: index % 4 === 0 ? COLORS.chalk : color,
-        size: 1.5 + Math.random() * 2.8,
-        shape: index % 3 === 0 ? "shard" : "spark",
-      });
+      this.particles.push({ x: core.x, y: core.y, z: 12, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 0.30 + Math.random() * 0.20, maxLife: 0.50, color: index % 4 === 0 ? COLORS.chalk : color, size: 1.5 + Math.random() * 2.8, shape: index % 3 === 0 ? "shard" : "spark" });
     }
     this.shockwaves.push({ x: core.x, y: core.y, radius: 18, target: event.type === "clutch" ? 116 : 72, life: 0.30, maxLife: 0.30, color });
   }
@@ -603,11 +833,6 @@ class RiftGame {
     const core = this.physics.core;
     const color = event.owner === "player" ? COLORS.amberHot : COLORS.violetHot;
     this.shockwaves.push({ x: core.x, y: core.y, radius: 20, target: 84 + event.charge * 52, life: 0.25, maxLife: 0.25, color, dashed: true });
-    for (let index = 0; index < Math.round(6 + event.charge * 10); index += 1) {
-      const angle = Math.atan2(core.vy, core.vx) + Math.PI + (Math.random() - 0.5) * 0.9;
-      const speed = 70 + Math.random() * 130;
-      this.particles.push({ x: core.x, y: core.y, z: 12, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 0.22 + Math.random() * 0.18, maxLife: 0.4, color: index % 3 ? color : COLORS.chalk, size: 1.2 + Math.random() * 1.8, shape: "spark" });
-    }
   }
 
   spawnRebound(event) {
@@ -618,7 +843,8 @@ class RiftGame {
 
   spawnGoal(owner, final) {
     const x = this.physics.core.x;
-    const y = owner === "player" ? ARENA.topReactorY : ARENA.bottomReactorY;
+    const advance = this.physics.overtimeOpen * 84;
+    const y = owner === "player" ? ARENA.topReactorY + advance : ARENA.bottomReactorY - advance;
     const color = owner === "player" ? COLORS.amber : COLORS.violet;
     for (let ring = 0; ring < (final ? 5 : 3); ring += 1) {
       this.shockwaves.push({ x, y, radius: 18 + ring * 9, target: 160 + ring * 25, life: 0.48 + ring * 0.07, maxLife: 0.48 + ring * 0.07, color: ring % 2 ? COLORS.chalk : color, delay: ring * 0.045 });
@@ -627,36 +853,14 @@ class RiftGame {
     for (let index = 0; index < count; index += 1) {
       const angle = Math.PI * 2 * index / count + Math.random() * 0.18;
       const speed = 110 + Math.random() * (final ? 340 : 270);
-      this.particles.push({
-        x,
-        y,
-        z: 12 + Math.random() * 15,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 0.42 + Math.random() * (final ? 0.72 : 0.48),
-        maxLife: final ? 1.14 : 0.90,
-        color: index % 5 === 0 ? COLORS.chalk : index % 9 === 0 ? COLORS.danger : color,
-        size: 2 + Math.random() * (final ? 5.5 : 4.2),
-        shape: index % 2 ? "shard" : "spark",
-      });
+      this.particles.push({ x, y, z: 12 + Math.random() * 15, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 0.42 + Math.random() * (final ? 0.72 : 0.48), maxLife: final ? 1.14 : 0.90, color: index % 5 === 0 ? COLORS.chalk : index % 9 === 0 ? COLORS.danger : color, size: 2 + Math.random() * (final ? 5.5 : 4.2), shape: index % 2 ? "shard" : "spark" });
     }
   }
 
   spawnResult(victory) {
     const color = victory ? COLORS.amber : COLORS.violet;
     for (let index = 0; index < 42; index += 1) {
-      this.particles.push({
-        x: 35 + Math.random() * 320,
-        y: 120 + Math.random() * 250,
-        z: 8 + Math.random() * 20,
-        vx: (Math.random() - 0.5) * 105,
-        vy: 45 + Math.random() * 115,
-        life: 1.0 + Math.random() * 0.9,
-        maxLife: 1.9,
-        color: index % 4 === 0 ? COLORS.chalk : color,
-        size: 2 + Math.random() * 4,
-        shape: "shard",
-      });
+      this.particles.push({ x: 42 + Math.random() * 306, y: 170 + Math.random() * 504, z: 8 + Math.random() * 20, vx: (Math.random() - 0.5) * 105, vy: (Math.random() - 0.5) * 125, life: 1.0 + Math.random() * 0.9, maxLife: 1.9, color: index % 4 === 0 ? COLORS.chalk : color, size: 2 + Math.random() * 4, shape: "shard" });
     }
   }
 
@@ -670,6 +874,7 @@ class RiftGame {
       fx.recoil = Math.max(0, fx.recoil - dt * 7.5);
       fx.flash = Math.max(0, fx.flash - dt * 5.8);
       fx.celebrate = Math.max(0, fx.celebrate - dt * 1.8);
+      fx.power = Math.max(0, fx.power - dt * 2.7);
     }
     for (const fx of Object.values(this.reactorFx)) {
       fx.impact = Math.max(0, fx.impact - dt * 2.7);
@@ -680,7 +885,7 @@ class RiftGame {
       particle.x += particle.vx * dt;
       particle.y += particle.vy * dt;
       particle.vx *= Math.pow(0.94, dt * 60);
-      particle.vy = particle.vy * Math.pow(0.96, dt * 60) + 30 * dt;
+      particle.vy *= Math.pow(0.96, dt * 60);
       particle.z = Math.max(0, (particle.z || 0) - dt * 7);
     }
     this.particles = this.particles.filter((particle) => particle.life > 0).slice(-240);
@@ -709,19 +914,7 @@ class RiftGame {
           : this.physics.pressure > 0.56 || threat > 0.42
             ? "PRESSURE"
             : "DUEL";
-    this.audio.update({
-      speed,
-      playerField: this.physics.nodes.player.influence,
-      botField: this.physics.nodes.bot.influence,
-      playerSpeed,
-      botSpeed,
-      tension: this.physics.matchPoint ? 1 : this.physics.pressure,
-      danger: threat,
-      crowd: this.crowdPulse,
-      contested: this.physics.contention,
-      phase,
-      active: this.state !== GAME_STATES.MENU || this.audio.unlocked,
-    });
+    this.audio.update({ speed, playerField: this.physics.nodes.player.influence, botField: this.physics.nodes.bot.influence, playerSpeed, botSpeed, tension: this.physics.matchPoint ? 1 : this.physics.pressure, danger: threat, crowd: this.crowdPulse, contested: this.physics.contention, phase, active: this.state !== GAME_STATES.MENU || this.audio.unlocked });
   }
 
   activateQAScene(scene) {
@@ -732,13 +925,22 @@ class RiftGame {
     }
     this.startMatch(true);
     this.matchIntro = 0;
+    this.physics.resetRound("neutral");
+    this.state = GAME_STATES.PLAYING;
+    if (scene === "controls") {
+      this.flux.player = 82;
+      this.#updatePowerUI(true);
+      actionCluster.classList.add("open");
+      for (const option of powerOptions) option.style.opacity = "1";
+      this.physics.core.vx = 290;
+      this.physics.core.vy = -190;
+      return true;
+    }
     if (scene === "matchpoint" || scene === "clutch") {
       this.scores.player = 2;
       this.scores.bot = 2;
       this.updateScoreUI();
-      this.physics.resetRound("neutral");
       this.physics.setScoreContext(4, true);
-      this.state = GAME_STATES.PLAYING;
       matchPointFlag.hidden = false;
       matchPointLabel.textContent = "FINAL POINT";
       if (scene === "clutch") {
@@ -748,7 +950,6 @@ class RiftGame {
         this.physics.core.vy = 480;
         this.physics.nodes.player.x = 187;
         this.physics.nodes.player.y = 706;
-        this.physics.setNodeTarget("player", 235, 680);
       } else {
         this.physics.core.vx = 330;
         this.physics.core.vy = -260;
@@ -766,10 +967,8 @@ class RiftGame {
       this.scores.player = 1;
       this.scores.bot = 1;
       this.updateScoreUI();
-      this.physics.resetRound("neutral");
       this.physics.setScoreContext(2, false);
       this.finDeploy = 1;
-      this.state = GAME_STATES.PLAYING;
       this.physics.core.vx = 420;
       this.physics.core.vy = -180;
       return true;
@@ -782,10 +981,13 @@ const game = new RiftGame();
 const publicApi = {
   build: BUILD_ID,
   identity: BUILD_IDENTITY,
+  orientation: "landscape",
+  control: "dual-thumb-joystick-radial",
   physics: game.physicsMode,
   candidate: CANDIDATE_CONFIGS[game.physicsMode].label,
   camera: game.cameraMode,
   presentation: CAMERA_CANDIDATES[game.cameraMode].label,
+  powers: Object.values(POWER_DEFINITIONS).map((power) => ({ ...power })),
   get state() { return game.state; },
   get scores() { return { ...game.scores }; },
   snapshot() {
@@ -803,6 +1005,9 @@ const publicApi = {
       contention: snapshot.contention,
       contestDominance: snapshot.contestDominance,
       camera: game.cameraMode,
+      input: game.input.snapshot(),
+      flux: { ...game.flux },
+      armedPower: { ...game.armedPower },
     };
   },
   telemetry() {
@@ -815,6 +1020,6 @@ globalThis.__RIFTBALL__ = Object.freeze(publicApi);
 
 setTimeout(() => {
   boot.classList.add("dismissed");
-  setTimeout(() => { boot.hidden = true; }, 280);
+  setTimeout(() => { boot.hidden = true; }, 260);
   if (game.qaScene) setTimeout(() => game.activateQAScene(game.qaScene), 60);
-}, 520);
+}, 480);

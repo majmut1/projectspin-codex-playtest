@@ -1,5 +1,12 @@
 import { BOT_STATES } from "./bot.mjs";
-import { ARENA, REFERENCE_HEIGHT, REFERENCE_WIDTH, RIFTBALL_CONSTANTS } from "./physics.mjs";
+import {
+  ARENA,
+  REFERENCE_HEIGHT,
+  REFERENCE_WIDTH,
+  RIFTBALL_CONSTANTS,
+  WORLD_HEIGHT,
+  WORLD_WIDTH,
+} from "./physics.mjs";
 
 export const COLORS = Object.freeze({
   void: "#08070b",
@@ -88,21 +95,21 @@ export class RiftRenderer {
     const context = this.context;
     const final = game.physics.matchPoint;
     const breakOpen = game.physics.overtimeOpen || 0;
-    const background = context.createRadialGradient(195, 390, 24, 195, 430, 520);
-    background.addColorStop(0, final ? "#24111e" : "#17131b");
-    background.addColorStop(0.40, breakOpen > 0.05 ? "#15101a" : "#0d0c12");
+    const background = context.createRadialGradient(REFERENCE_WIDTH * 0.5, REFERENCE_HEIGHT * 0.48, 22, REFERENCE_WIDTH * 0.5, REFERENCE_HEIGHT * 0.5, 540);
+    background.addColorStop(0, final ? "#28131f" : "#17131b");
+    background.addColorStop(0.42, breakOpen > 0.05 ? "#17101b" : "#0d0c12");
     background.addColorStop(1, "#040307");
     context.fillStyle = background;
     context.fillRect(0, 0, REFERENCE_WIDTH, REFERENCE_HEIGHT);
 
     context.save();
     context.globalAlpha = 0.22 + game.crowdPulse * 0.12;
-    for (let index = 0; index < 22; index += 1) {
-      const y = 24 + index * 39;
-      const offset = (index % 3) * 4;
-      context.fillStyle = index % 2 ? rgba(COLORS.violet, 0.15) : rgba(COLORS.amber, 0.13);
-      context.fillRect(0, y + offset, 5 + (index % 4), 21);
-      context.fillRect(REFERENCE_WIDTH - 5 - (index % 4), y - offset, 5 + (index % 4), 21);
+    for (let index = 0; index < 32; index += 1) {
+      const x = 18 + index * 26;
+      const offset = (index % 3) * 3;
+      context.fillStyle = index < 16 ? rgba(COLORS.amber, 0.14) : rgba(COLORS.violet, 0.16);
+      context.fillRect(x + offset, 0, 15, 4 + (index % 3));
+      context.fillRect(x - offset, REFERENCE_HEIGHT - 5 - (index % 3), 15, 5 + (index % 3));
     }
     context.restore();
   }
@@ -121,36 +128,34 @@ export class RiftRenderer {
     const pulse = game.crowdPulse;
     const finalPulse = game.physics.matchPoint ? 0.28 + Math.sin(game.visualTime * 5.2) * 0.12 : 0;
     for (let side = 0; side < 2; side += 1) {
-      const direction = side ? 1 : -1;
-      const innerX = side ? 370 : 20;
-      const outerX = side ? 390 : 0;
-      const gradient = context.createLinearGradient(innerX, 0, outerX, 0);
-      gradient.addColorStop(0, "rgba(21,19,27,0.94)");
-      gradient.addColorStop(1, "rgba(5,4,8,0.98)");
+      const top = side === 0;
+      const innerY = top ? 43 : REFERENCE_HEIGHT - 43;
+      const outerY = top ? 0 : REFERENCE_HEIGHT;
+      const gradient = context.createLinearGradient(0, innerY, 0, outerY);
+      gradient.addColorStop(0, "rgba(22,20,29,0.95)");
+      gradient.addColorStop(1, "rgba(5,4,8,0.99)");
       context.fillStyle = gradient;
-      polygon(context, [[innerX, 60], [outerX, 16], [outerX, 828], [innerX, 786]]);
+      polygon(context, top
+        ? [[50, innerY], [0, 4], [REFERENCE_WIDTH, 4], [REFERENCE_WIDTH - 50, innerY]]
+        : [[50, innerY], [0, REFERENCE_HEIGHT - 4], [REFERENCE_WIDTH, REFERENCE_HEIGHT - 4], [REFERENCE_WIDTH - 50, innerY]]);
       context.fill();
-      for (let row = 0; row < 15; row += 1) {
-        const y = 74 + row * 48;
-        const width = 8 + (row % 3) * 2;
-        const activity = clamp(0.12 + pulse * 0.55 + finalPulse + Math.sin(game.visualTime * 3 + row * 1.8) * 0.05, 0.04, 0.95);
-        const color = row % 4 === 0 ? COLORS.chalk : side ? COLORS.violet : COLORS.amber;
+      for (let column = 0; column < 27; column += 1) {
+        const x = 58 + column * 27;
+        const activity = clamp(0.10 + pulse * 0.58 + finalPulse + Math.sin(game.visualTime * 3 + column * 1.3) * 0.05, 0.04, 0.96);
+        const color = column < 13 ? COLORS.amber : column > 14 ? COLORS.violet : COLORS.chalk;
         context.fillStyle = rgba(color, activity);
-        context.fillRect(side ? 377 : 3, y, width, 4);
-        context.fillStyle = rgba(color, activity * 0.42);
-        context.fillRect(side ? 373 : 8, y + 9, 5, 2);
-        context.fillRect(side ? 380 : 3, y + 15, 6, 2);
+        context.fillRect(x, top ? 14 + (column % 3) * 5 : REFERENCE_HEIGHT - 18 - (column % 3) * 5, 11 + column % 4, 3);
+        context.fillStyle = rgba(color, activity * 0.36);
+        context.fillRect(x + 5, top ? 28 : REFERENCE_HEIGHT - 31, 6, 2);
       }
-      context.strokeStyle = rgba(side ? COLORS.violet : COLORS.amber, 0.18 + pulse * 0.22);
-      context.lineWidth = 2;
+      context.strokeStyle = rgba(COLORS.chalk, 0.12 + pulse * 0.18);
+      context.lineWidth = 1.5;
       context.beginPath();
-      context.moveTo(innerX, 68);
-      context.lineTo(innerX + direction * 13, 180);
-      context.lineTo(innerX, 290);
-      context.lineTo(innerX + direction * 13, 422);
-      context.lineTo(innerX, 552);
-      context.lineTo(innerX + direction * 13, 674);
-      context.lineTo(innerX, 780);
+      context.moveTo(42, innerY);
+      context.lineTo(210, innerY + (top ? -10 : 10));
+      context.lineTo(REFERENCE_WIDTH * 0.5, innerY);
+      context.lineTo(REFERENCE_WIDTH - 210, innerY + (top ? -10 : 10));
+      context.lineTo(REFERENCE_WIDTH - 42, innerY);
       context.stroke();
     }
   }
@@ -161,10 +166,10 @@ export class RiftRenderer {
     const topRight = this.#project(ARENA.right, ARENA.topWall);
     const bottomRight = this.#project(ARENA.right, ARENA.bottomWall);
     const bottomLeft = this.#project(ARENA.left, ARENA.bottomWall);
-    const floor = context.createLinearGradient(0, topLeft.y, 0, bottomLeft.y);
-    floor.addColorStop(0, "#11101a");
-    floor.addColorStop(0.48, "#0d0c12");
-    floor.addColorStop(1, "#17120f");
+    const floor = context.createLinearGradient(bottomLeft.x, 0, topLeft.x, 0);
+    floor.addColorStop(0, "#1b130e");
+    floor.addColorStop(0.47, "#0d0c12");
+    floor.addColorStop(1, "#12101d");
     context.fillStyle = floor;
     polygon(context, [[topLeft.x, topLeft.y], [topRight.x, topRight.y], [bottomRight.x, bottomRight.y], [bottomLeft.x, bottomLeft.y]]);
     context.fill();
@@ -179,7 +184,7 @@ export class RiftRenderer {
       const rightA = this.#project(ARENA.right - 2, band.y0);
       const rightB = this.#project(ARENA.right - 2, band.y1);
       const leftB = this.#project(ARENA.left + 2, band.y1);
-      const gradient = context.createLinearGradient(0, leftA.y, 0, leftB.y);
+      const gradient = context.createLinearGradient(leftA.x, 0, leftB.x, 0);
       gradient.addColorStop(0, rgba(band.color, band.color === COLORS.chalk ? 0.012 : 0.055));
       gradient.addColorStop(0.5, rgba(band.color, band.color === COLORS.chalk ? 0.022 : 0.025));
       gradient.addColorStop(1, "rgba(0,0,0,0)");
@@ -231,27 +236,23 @@ export class RiftRenderer {
   #drawSideArchitecture(game) {
     const context = this.context;
     const energy = 0.26 + game.physics.pressure * 0.23 + game.crowdPulse * 0.18;
-    for (let side = 0; side < 2; side += 1) {
-      const worldX = side ? ARENA.right : ARENA.left;
-      const color = side ? COLORS.violet : COLORS.amber;
-      for (let segment = 0; segment < 8; segment += 1) {
-        const y = 102 + segment * 84;
-        const top = this.#project(worldX, y);
-        const bottom = this.#project(worldX, y + 59);
-        const outward = side ? 16 : -16;
-        context.fillStyle = segment % 2 ? "#17161d" : "#201e24";
-        polygon(context, [[top.x, top.y], [top.x + outward, top.y + 8], [bottom.x + outward * 0.72, bottom.y - 6], [bottom.x, bottom.y]]);
+    for (let rail = 0; rail < 2; rail += 1) {
+      const worldX = rail ? ARENA.right : ARENA.left;
+      const outward = rail ? 1 : -1;
+      for (let segment = 0; segment < 10; segment += 1) {
+        const worldY = 84 + segment * 70;
+        const a = this.#project(worldX, worldY);
+        const b = this.#project(worldX, worldY + 48);
+        const color = worldY > WORLD_HEIGHT * 0.52 ? COLORS.amber : COLORS.violet;
+        context.fillStyle = segment % 2 ? "#17161d" : "#211f26";
+        polygon(context, [[a.x, a.y], [a.x + 7, a.y + outward * 12], [b.x - 7, b.y + outward * 12], [b.x, b.y]]);
         context.fill();
-        context.strokeStyle = rgba(color, energy * (segment % 3 === 0 ? 1 : 0.5));
+        context.strokeStyle = rgba(color, energy * (segment % 3 === 0 ? 1 : 0.48));
         context.lineWidth = segment % 3 === 0 ? 2 : 1;
         context.beginPath();
-        context.moveTo(top.x + outward * 0.18, top.y + 10);
-        context.lineTo(bottom.x + outward * 0.18, bottom.y - 10);
+        context.moveTo(a.x + 7, a.y + outward * 7);
+        context.lineTo(b.x - 7, b.y + outward * 7);
         context.stroke();
-        if (segment % 2 === 0) {
-          context.fillStyle = rgba(COLORS.chalk, 0.23 + game.crowdPulse * 0.3);
-          context.fillRect(top.x + outward * 0.45 - (side ? 0 : 4), (top.y + bottom.y) * 0.5, 4, 2);
-        }
       }
     }
   }
@@ -261,7 +262,7 @@ export class RiftRenderer {
     const center = this.#project(195, 422);
     context.save();
     context.translate(center.x, center.y);
-    context.scale(center.scale * 0.82, center.scale * 0.48);
+    context.scale(center.scale * 0.88, center.scale * 0.50);
     context.globalAlpha = 0.16 + game.physics.pressure * 0.08;
     context.strokeStyle = COLORS.chalk;
     context.lineWidth = 2;
@@ -280,17 +281,17 @@ export class RiftRenderer {
     const pulse = 0.45 + Math.sin(game.visualTime * 6.2) * 0.16;
     context.save();
     context.fillStyle = rgba(COLORS.danger, 0.06 + pulse * 0.06);
-    context.fillRect(0, 0, 9, REFERENCE_HEIGHT);
-    context.fillRect(REFERENCE_WIDTH - 9, 0, 9, REFERENCE_HEIGHT);
+    context.fillRect(0, 0, REFERENCE_WIDTH, 8);
+    context.fillRect(0, REFERENCE_HEIGHT - 8, REFERENCE_WIDTH, 8);
     context.strokeStyle = rgba(COLORS.danger, pulse);
     context.lineWidth = 2;
     context.setLineDash([15, 16]);
     context.lineDashOffset = -game.visualTime * 54;
     context.beginPath();
-    context.moveTo(11, 0);
-    context.lineTo(11, REFERENCE_HEIGHT);
-    context.moveTo(REFERENCE_WIDTH - 11, 0);
-    context.lineTo(REFERENCE_WIDTH - 11, REFERENCE_HEIGHT);
+    context.moveTo(0, 11);
+    context.lineTo(REFERENCE_WIDTH, 11);
+    context.moveTo(0, REFERENCE_HEIGHT - 11);
+    context.lineTo(REFERENCE_WIDTH, REFERENCE_HEIGHT - 11);
     context.stroke();
     context.restore();
   }
@@ -304,11 +305,11 @@ export class RiftRenderer {
     context.lineWidth = 1.5;
     for (let branch = -1; branch <= 1; branch += 2) {
       context.beginPath();
-      context.moveTo(center.x, center.y - 108);
-      context.lineTo(center.x + branch * 11 * open, center.y - 44);
-      context.lineTo(center.x + branch * 4 * open, center.y + 8);
-      context.lineTo(center.x + branch * 16 * open, center.y + 74);
-      context.lineTo(center.x + branch * 7 * open, center.y + 138);
+      context.moveTo(center.x - 144, center.y);
+      context.lineTo(center.x - 66, center.y + branch * 11 * open);
+      context.lineTo(center.x + 4, center.y + branch * 4 * open);
+      context.lineTo(center.x + 72, center.y + branch * 16 * open);
+      context.lineTo(center.x + 146, center.y + branch * 7 * open);
       context.stroke();
     }
     context.restore();
@@ -342,15 +343,15 @@ export class RiftRenderer {
     const head = this.#project(core.x, core.y, 12);
     context.save();
     for (let ribbon = -1; ribbon <= 1; ribbon += 2) {
-      const gradient = context.createLinearGradient(head.x - 130, head.y + 90, head.x, head.y);
+      const gradient = context.createLinearGradient(head.x - 150, head.y, head.x, head.y);
       gradient.addColorStop(0, "rgba(255,255,255,0)");
       gradient.addColorStop(0.52, rgba(ribbon < 0 ? COLORS.amber : COLORS.violet, 0.18));
       gradient.addColorStop(1, rgba(COLORS.chalk, 0.62));
       context.strokeStyle = gradient;
       context.lineWidth = 2.4;
       context.beginPath();
-      context.moveTo(head.x - 128, head.y + 78 + ribbon * 16);
-      context.bezierCurveTo(head.x - 84, head.y + 60 + Math.sin(time * 2) * 7, head.x - 42, head.y + ribbon * 12, head.x, head.y);
+      context.moveTo(head.x - 150, head.y + ribbon * 18);
+      context.bezierCurveTo(head.x - 92, head.y + ribbon * 12 + Math.sin(time * 2) * 7, head.x - 45, head.y + ribbon * 7, head.x, head.y);
       context.stroke();
     }
     context.restore();
@@ -392,13 +393,13 @@ export class RiftRenderer {
     const victory = game.scores.player > game.scores.bot;
     const winner = victory ? "player" : "bot";
     const source = game.physics.nodes[winner];
-    const core = { x: victory ? 240 : 150, y: 276, vx: victory ? 200 : -200, vy: -80, rotation: game.visualTime * 1.8 };
+    const core = { x: victory ? 150 : 240, y: 422, vx: victory ? -90 : 90, vy: victory ? -220 : 220, rotation: game.visualTime * 1.8 };
     const node = {
       ...source,
-      x: victory ? 142 : 248,
-      y: 292 + Math.sin(game.visualTime * 2.3) * 5,
-      vx: victory ? 55 : -55,
-      vy: -20,
+      x: 195 + Math.sin(game.visualTime * 2.3) * 5,
+      y: victory ? 626 : 218,
+      vx: Math.sin(game.visualTime * 2.3) * 40,
+      vy: victory ? -80 : 80,
       influence: 0.58,
       authority: 1,
       tetherActive: true,
@@ -414,22 +415,23 @@ export class RiftRenderer {
   }
 
   #drawReactors(game) {
-    this.#drawReactor(game, 195, ARENA.topReactorY, false, game.scores.player, COLORS.violet, game.reactorFx.bot);
-    this.#drawReactor(game, 195, ARENA.bottomReactorY, true, game.scores.bot, COLORS.amber, game.reactorFx.player);
+    const advance = game.physics.overtimeOpen * 84;
+    this.#drawReactor(game, 195, ARENA.topReactorY + advance, false, game.scores.player, COLORS.violet, game.reactorFx.bot);
+    this.#drawReactor(game, 195, ARENA.bottomReactorY - advance, true, game.scores.bot, COLORS.amber, game.reactorFx.player);
   }
 
-  #drawReactor(game, x, y, facingUp, damage, color, fx) {
+  #drawReactor(game, x, y, isPlayer, damage, color, fx) {
     const context = this.context;
     const point = this.#project(x, y, 4);
-    const danger = facingUp ? game.danger.player : game.danger.bot;
+    const danger = isPlayer ? game.danger.player : game.danger.bot;
     const finalEnergy = game.physics.matchPoint ? 0.20 + Math.sin(game.visualTime * 6.1) * 0.07 : 0;
-    const pulse = 1 + Math.sin(game.visualTime * (game.physics.matchPoint ? 7 : 2.8) + (facingUp ? 1.3 : 0)) * (0.025 + danger * 0.035);
+    const pulse = 1 + Math.sin(game.visualTime * (game.physics.matchPoint ? 7 : 2.8) + (isPlayer ? 1.3 : 0)) * (0.025 + danger * 0.035);
     const impact = fx?.impact || 0;
     const collapse = fx?.collapse || 0;
     const breakScale = 1 + game.physics.overtimeOpen * 0.34;
     context.save();
     context.translate(point.x, point.y);
-    context.rotate(facingUp ? Math.PI : 0);
+    context.rotate(isPlayer ? -Math.PI * 0.5 : Math.PI * 0.5);
     context.scale(point.scale * pulse * breakScale * (1 + impact * 0.10), point.scale * pulse * (1 - collapse * 0.18));
 
     context.fillStyle = "rgba(0,0,0,0.45)";
@@ -576,7 +578,8 @@ export class RiftRenderer {
         else context.lineTo(x, y);
       }
       const influence = game.trail[0]?.influence ?? 0;
-      const base = ribbon === 0 ? COLORS.chalk : influence > 0.07 ? COLORS.amber : influence < -0.07 ? COLORS.violet : ribbon < 0 ? COLORS.amber : COLORS.violet;
+      const curveColor = game.physics.core.curveTime > 0 ? (game.physics.core.curveOwner === "player" ? COLORS.cyan : COLORS.violetHot) : null;
+      const base = curveColor || (ribbon === 0 ? COLORS.chalk : influence > 0.07 ? COLORS.amber : influence < -0.07 ? COLORS.violet : ribbon < 0 ? COLORS.amber : COLORS.violet);
       context.strokeStyle = rgba(base, (ribbon === 0 ? 0.20 : 0.12) + clamp(speed / 760, 0, 1) * (ribbon === 0 ? 0.52 : 0.38));
       context.lineWidth = ribbon === 0 ? 1.5 + clamp(speed / 760, 0, 1) * 2.8 : 1.1 + clamp(speed / 760, 0, 1) * 2.1;
       context.lineCap = "round";
@@ -590,7 +593,8 @@ export class RiftRenderer {
     if (threat < 0.14) return;
     const context = this.context;
     const core = game.physics.core;
-    const targetY = game.danger.player > game.danger.bot ? ARENA.bottomReactorY : ARENA.topReactorY;
+    const advance = game.physics.overtimeOpen * 84;
+    const targetY = game.danger.player > game.danger.bot ? ARENA.bottomReactorY - advance : ARENA.topReactorY + advance;
     const start = this.#project(core.x, core.y, 13);
     const end = this.#project(195, targetY, 4);
     context.save();
@@ -715,10 +719,10 @@ export class RiftRenderer {
     const corePoint = this.#project(core.x, core.y, 13);
     const angle = Math.atan2(corePoint.y - point.y, corePoint.x - point.x) + Math.PI * 0.5;
     const speed = Math.hypot(node.vx || 0, node.vy || 0);
-    const speedN = clamp(speed / (isPlayer ? 900 : 680), 0, 1);
+    const speedN = clamp(speed / (isPlayer ? 600 : 680), 0, 1);
     const influence = clamp(node.influence || 0, 0, 1);
     const charge = clamp(node.tetherCharge || 0, 0, 1);
-    const recoil = fx?.recoil || 0;
+    const recoil = Math.max(fx?.recoil || 0, node.actionKick || 0);
     const celebrate = fx?.celebrate || 0;
     const aggressive = !isPlayer && [BOT_STATES.PRESS, BOT_STATES.TRAP, BOT_STATES.SCRAMBLE].includes(game.lastBotState);
     const compression = 1 - recoil * 0.18;
@@ -1040,7 +1044,7 @@ export class RiftRenderer {
     const context = this.context;
     const threat = Math.max(game.danger.player, game.danger.bot);
     if (threat < 0.05) return;
-    const gradient = context.createRadialGradient(195, 422, 190, 195, 422, 470);
+    const gradient = context.createRadialGradient(REFERENCE_WIDTH * 0.5, REFERENCE_HEIGHT * 0.5, 110, REFERENCE_WIDTH * 0.5, REFERENCE_HEIGHT * 0.5, 520);
     gradient.addColorStop(0, "rgba(255,63,89,0)");
     gradient.addColorStop(0.72, "rgba(255,63,89,0)");
     gradient.addColorStop(1, rgba(COLORS.danger, 0.10 + threat * 0.18));
@@ -1057,21 +1061,21 @@ export class RiftRenderer {
     context.save();
     context.globalAlpha = clamp(opacity, 0, 1);
     context.fillStyle = "rgba(8,7,11,0.76)";
-    context.fillRect(43, 374, 304, 62);
+    context.fillRect(REFERENCE_WIDTH * 0.5 - 190, REFERENCE_HEIGHT * 0.5 - 34, 380, 68);
     context.strokeStyle = rgba(COLORS.chalk, 0.34);
     context.lineWidth = 1;
     context.beginPath();
-    context.moveTo(58, 374);
-    context.lineTo(332, 374);
-    context.moveTo(58, 436);
-    context.lineTo(332, 436);
+    context.moveTo(REFERENCE_WIDTH * 0.5 - 170, REFERENCE_HEIGHT * 0.5 - 34);
+    context.lineTo(REFERENCE_WIDTH * 0.5 + 170, REFERENCE_HEIGHT * 0.5 - 34);
+    context.moveTo(REFERENCE_WIDTH * 0.5 - 170, REFERENCE_HEIGHT * 0.5 + 34);
+    context.lineTo(REFERENCE_WIDTH * 0.5 + 170, REFERENCE_HEIGHT * 0.5 + 34);
     context.stroke();
     context.fillStyle = progress > 0.70 ? COLORS.amberHot : COLORS.chalk;
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.font = `900 ${progress < 0.38 ? 25 : 13}px Inter, sans-serif`;
     context.letterSpacing = "2px";
-    context.fillText(label, 195, 405);
+    context.fillText(label, REFERENCE_WIDTH * 0.5, REFERENCE_HEIGHT * 0.5);
     context.restore();
   }
 }

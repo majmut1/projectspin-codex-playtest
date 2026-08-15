@@ -195,6 +195,15 @@ export class RiftAudio {
   event(event) {
     if (!this.unlocked || !this.enabled || !event) return;
     switch (event.type) {
+      case "strike-start":
+        this.#tone({ from: 96, to: 154, duration: 0.055, gain: 0.075, type: "triangle", filter: 720 });
+        break;
+      case "strike":
+        this.#strike(event.power || "normal", event.sweetSpot || 0);
+        break;
+      case "strike-whiff":
+        this.#whoosh(176, 510, 0.105, 0.050);
+        break;
       case "intercept":
         this.#impact(118, 48, 0.13, 0.20, 0.17);
         break;
@@ -239,6 +248,26 @@ export class RiftAudio {
 
   ui() {
     this.#tone({ from: 260, to: 520, duration: 0.11, gain: 0.11, type: "triangle" });
+  }
+
+  radial() {
+    this.#tone({ from: 164, to: 328, duration: 0.085, gain: 0.072, type: "triangle", filter: 920 });
+    this.#tone({ from: 492, to: 656, duration: 0.075, gain: 0.032, type: "sine", delay: 0.025 });
+  }
+
+  powerArm(power = "rush") {
+    const voices = {
+      rush: [220, 760, "sawtooth", 1180],
+      bend: [420, 1120, "sine", 1540],
+      brake: [260, 72, "triangle", 620],
+      burst: [136, 520, "square", 940],
+    };
+    const [from, to, type, filter] = voices[power] || voices.rush;
+    this.#tone({ from, to, duration: 0.15, gain: 0.090, type, filter });
+  }
+
+  denied() {
+    this.#tone({ from: 118, to: 82, duration: 0.09, gain: 0.062, type: "square", filter: 430 });
   }
 
   matchPoint() {
@@ -291,6 +320,34 @@ export class RiftAudio {
       this.#tone({ from: 220, to: 58, duration: 0.72, gain: 0.18, type: "sawtooth", filter: 520 });
     }
     this.crowdResponse(victory ? 1 : 0.32);
+  }
+
+  #strike(power, sweetSpot) {
+    const accent = 1 + clamp(sweetSpot, 0, 1) * 0.22;
+    if (power === "rush") {
+      this.#impact(190, 34, 0.17, 0.30 * accent, 0.24);
+      this.#whoosh(250, 1760, 0.21, 0.15);
+      return;
+    }
+    if (power === "bend") {
+      this.#impact(268, 72, 0.13, 0.21 * accent, 0.14);
+      this.#tone({ from: 410, to: 1380, duration: 0.31, gain: 0.135, type: "sine", filter: 1750 });
+      this.#whoosh(620, 1040, 0.24, 0.075);
+      return;
+    }
+    if (power === "brake") {
+      this.#impact(112, 31, 0.23, 0.31 * accent, 0.22);
+      this.#tone({ from: 310, to: 54, duration: 0.20, gain: 0.13, type: "triangle", filter: 610 });
+      return;
+    }
+    if (power === "burst") {
+      this.#impact(148, 38, 0.22, 0.29 * accent, 0.27);
+      this.#noiseBurst(0.18, 0.16, 1250, "bandpass");
+      this.#tone({ from: 164, to: 690, duration: 0.16, gain: 0.115, type: "square", filter: 1050 });
+      return;
+    }
+    this.#impact(164, 43, 0.145, 0.26 * accent, 0.18);
+    this.#whoosh(240, 920, 0.14, 0.095);
   }
 
   #tone({ from, to, duration, gain, type = "sine", delay = 0, filter = 1600 }) {

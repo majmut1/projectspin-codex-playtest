@@ -1,5 +1,10 @@
-export const REFERENCE_WIDTH = 390;
-export const REFERENCE_HEIGHT = 844;
+// The simulation keeps the proven portrait-era world axes internally while the
+// camera presents that field horizontally. This separates competitive physics
+// from the landscape screen and keeps every touch/control mapping explicit.
+export const WORLD_WIDTH = 390;
+export const WORLD_HEIGHT = 844;
+export const REFERENCE_WIDTH = 844;
+export const REFERENCE_HEIGHT = 390;
 
 export const PHYSICS_MODES = Object.freeze({
   TETHER: "tether",
@@ -84,6 +89,8 @@ const NODE_RADIUS = 25;
 const CONTACT_RADIUS = CORE_RADIUS + NODE_RADIUS;
 const CLOSE_RADIUS = 70;
 const RELEASE_RADIUS = 96;
+const STRIKE_REACH = 116;
+const BURST_REACH = 148;
 const RAIL_RADIUS = 7;
 const EPSILON = 0.00001;
 
@@ -169,12 +176,23 @@ export class RiftPhysics {
     this.matchPoint = false;
     this.frozen = false;
     this.events = [];
+    this.queuedEvents = [];
     this.railsActive = false;
     this.rails = [
       { ax: 83, ay: 402, bx: 143, by: 442, side: "left" },
       { ax: 247, ay: 442, bx: 307, by: 402, side: "right" },
     ];
-    this.core = { x: 195, y: 422, vx: 0, vy: 0, radius: CORE_RADIUS, rotation: 0 };
+    this.core = {
+      x: 195,
+      y: 422,
+      vx: 0,
+      vy: 0,
+      radius: CORE_RADIUS,
+      rotation: 0,
+      curveTime: 0,
+      curveStrength: 0,
+      curveOwner: null,
+    };
     this.nodes = {
       player: this.#makeNode("player", 195, 690),
       bot: this.#makeNode("bot", 195, 170),
@@ -204,6 +222,14 @@ export class RiftPhysics {
       authority: 0,
       fieldHeat: 0,
       fieldAngle: 0,
+      driveX: 0,
+      driveY: 0,
+      driveMagnitude: 0,
+      strikeWindow: 0,
+      strikeCooldown: 0,
+      strikePower: null,
+      strikePending: false,
+      actionKick: 0,
     };
   }
 
@@ -219,6 +245,28 @@ export class RiftPhysics {
     const zone = owner === "player" ? ARENA.playerZone : ARENA.botZone;
     node.targetX = clamp(x, zone.left, zone.right);
     node.targetY = clamp(y, zone.top, zone.bottom);
+  }
+
+  setNodeDrive(owner, x, y, magnitude = Math.hypot(x, y)) {
+    const node = this.nodes[owner];
+    if (!node) return;
+    const lengthValue = Math.max(Math.hypot(x, y), EPSILON);
+    const limitedMagnitude = clamp(magnitude, 0, 1);
+    node.driveX = limitedMagnitude > 0.02 ? x / lengthValue : 0;
+    node.driveY = limitedMagnitude > 0.02 ? y / lengthValue : 0;
+    node.driveMagnitude = limitedMagnitude;
+  }
+
+  requestStrike(owner, power = null) {
+    const node = this.nodes[owner];
+    if (!node || node.strikeCooldown > 0 || this.frozen) return false;
+    node.strikeWindow = power === "burst" ? 0.18 : 0.145;
+    node.strikePower = power;
+    node.strikePending = true;
+    node.actionKick = 1;
+    node.strikeCooldown = power ? 0.34 : 0.22;
+    this.queuedEvents.push({ type: "strike-start", owner, power });
+    return true;
   }
 
   resetRound(direction = "neutral") {
@@ -239,6 +287,7 @@ export class RiftPhysics {
     this.sameSideChain = 0;
     this.rallyContacts = 0;
     this.events.length = 0;
+    this.queuedEvents.length = 0;
     this.core.x = 195;
     this.core.y = 422;
     const lane = (this.random() - 0.5) * 0.38;
@@ -246,6 +295,9 @@ export class RiftPhysics {
     this.core.vx = lane * 120;
     this.core.vy = vertical * 112;
     this.core.rotation = 0;
+    this.core.curveTime = 0;
+    this.core.curveStrength = 0;
+    this.core.curveOwner = null;
     this.lastMotionAngle = Math.atan2(this.core.vy, this.core.vx);
     this.#resetNode(this.nodes.player, 195, 686);
     this.#resetNode(this.nodes.bot, 195, 170);
@@ -269,6 +321,14 @@ export class RiftPhysics {
     node.influence = 0;
     node.authority = 0;
     node.fieldHeat = 0;
+    node.driveX = 0;
+    node.driveY = 0;
+    node.driveMagnitude = 0;
+    node.strikeWindow = 0;
+    node.strikeCooldown = 0;
+    node.strikePower = null;
+    node.strikePending = false;
+    node.actionKick = 0;
   }
 
   launch(direction = "neutral", speed = 176) {
@@ -283,7 +343,7 @@ export class RiftPhysics {
   step(dt) {
     if (!Number.isFinite(dt) || dt <= 0) return [];
     dt = Math.min(dt, 1 / 30);
-    this.events = [];
+    this.events = this.queuedEvents.splice(0);
     this.time += dt;
     if (this.frozen) return this.events;
     this.roundTime += dt;
@@ -306,13 +366,15 @@ export class RiftPhysics {
     this.#applyNodeField(this.nodes.bot, fieldIntents.bot, dt);
     this.#resolveContention(fieldIntents, dt);
 
+    this.#applyCoreCurve(dt);
+
     const damping = Math.pow(this.config.coreDamping, dt * 60);
     this.core.vx *= damping;
     this.core.vy *= damping;
     this.pressure = Math.max(0, this.pressure - dt * 0.006);
     const longDuelPressure = clamp((this.roundTime - 7) / 20, 0, 0.90);
     this.duelSurge = longDuelPressure;
-    this.overtimeOpen = clamp((this.roundTime - 28) / 12, 0, 1);
+    this.overtimeOpen = clamp((this.roundTime - 18) / 8, 0, 1);
     this.pressure = Math.max(this.pressure, longDuelPressure);
     if (!this.surgeAnnounced && this.duelSurge >= 0.58) {
       this.surgeAnnounced = true;
@@ -348,8 +410,10 @@ export class RiftPhysics {
     this.core.y += this.core.vy * dt;
     this.core.rotation += currentSpeed * dt * 0.010;
 
-    this.#resolveNodeContact(this.nodes.player);
-    this.#resolveNodeContact(this.nodes.bot);
+    const playerActionHit = this.#resolveActionStrike(this.nodes.player);
+    const botActionHit = this.#resolveActionStrike(this.nodes.bot);
+    if (!playerActionHit) this.#resolveNodeContact(this.nodes.player);
+    if (!botActionHit) this.#resolveNodeContact(this.nodes.bot);
     if (this.railsActive) {
       for (const rail of this.rails) this.#resolveRail(rail);
     }
@@ -372,14 +436,26 @@ export class RiftPhysics {
     node.previousY = node.y;
     node.contactCooldown = Math.max(0, node.contactCooldown - dt);
     node.tetherCooldown = Math.max(0, node.tetherCooldown - dt);
+    node.strikeCooldown = Math.max(0, node.strikeCooldown - dt);
+    node.strikeWindow = Math.max(0, node.strikeWindow - dt);
+    node.actionKick = Math.max(0, node.actionKick - dt * 7.5);
 
     const dx = node.targetX - node.x;
     const dy = node.targetY - node.y;
     const distance = length(dx, dy);
-    const maxSpeed = isPlayer ? 900 : 640;
-    const acceleration = isPlayer ? 6500 : 3600;
-    const desiredSpeed = Math.min(maxSpeed, distance * (isPlayer ? 16 : 7.5));
-    const direction = distance > EPSILON ? { x: dx / distance, y: dy / distance } : { x: 0, y: 0 };
+    const maxSpeed = isPlayer ? 560 : 640;
+    const acceleration = isPlayer ? 4100 : 3600;
+    const useDrive = isPlayer && node.driveMagnitude > 0.015;
+    const desiredSpeed = useDrive
+      ? maxSpeed * Math.pow(node.driveMagnitude, 0.82)
+      : isPlayer
+        ? 0
+        : Math.min(maxSpeed, distance * 7.5);
+    const direction = useDrive
+      ? { x: node.driveX, y: node.driveY }
+      : distance > EPSILON
+        ? { x: dx / distance, y: dy / distance }
+        : { x: 0, y: 0 };
     const desiredVx = direction.x * desiredSpeed;
     const desiredVy = direction.y * desiredSpeed;
     node.vx = moveToward(node.vx, desiredVx, acceleration * dt);
@@ -521,6 +597,94 @@ export class RiftPhysics {
     node.closestDistance = Infinity;
   }
 
+  #applyCoreCurve(dt) {
+    if (this.core.curveTime <= 0 || Math.abs(this.core.curveStrength) < 1) {
+      this.core.curveTime = 0;
+      this.core.curveStrength = 0;
+      this.core.curveOwner = null;
+      return;
+    }
+    const speed = length(this.core.vx, this.core.vy);
+    if (speed > 24) {
+      const forward = normalized(this.core.vx, this.core.vy);
+      const fade = clamp(this.core.curveTime / 0.82, 0, 1);
+      this.core.vx += -forward.y * this.core.curveStrength * fade * dt;
+      this.core.vy += forward.x * this.core.curveStrength * fade * dt;
+    }
+    this.core.curveTime = Math.max(0, this.core.curveTime - dt);
+  }
+
+  #resolveActionStrike(node) {
+    if (!node.strikePending) return false;
+    if (node.strikeWindow <= 0) {
+      this.events.push({ type: "strike-whiff", owner: node.owner, power: node.strikePower });
+      node.strikePending = false;
+      node.strikePower = null;
+      return false;
+    }
+
+    const dx = this.core.x - node.x;
+    const dy = this.core.y - node.y;
+    const distance = Math.max(length(dx, dy), EPSILON);
+    const power = node.strikePower;
+    const reach = power === "burst" ? BURST_REACH : STRIKE_REACH;
+    if (distance > reach) return false;
+
+    const attackSign = node.owner === "player" ? -1 : 1;
+    const lateralIntent = clamp(node.driveX, -1, 1);
+    const positionAssist = clamp(dx / 92, -0.58, 0.58);
+    let direction = normalized(lateralIntent * 0.62 + positionAssist * 0.30, attackSign);
+    let speed = 438 + this.pressure * 92;
+    let carry = 0.20;
+
+    if (power === "rush") {
+      speed = 710 + this.pressure * 96;
+      carry = 0.08;
+    } else if (power === "bend") {
+      speed = 492 + this.pressure * 72;
+      carry = 0.15;
+      let curveSign = Math.sign(lateralIntent);
+      if (curveSign === 0) curveSign = this.core.x < WORLD_WIDTH * 0.5 ? 1 : -1;
+      this.core.curveTime = 0.82;
+      this.core.curveStrength = curveSign * (438 + this.pressure * 82);
+      this.core.curveOwner = node.owner;
+    } else if (power === "brake") {
+      speed = 352 + this.pressure * 55;
+      carry = 0.04;
+      this.core.vx *= 0.12;
+      this.core.vy *= 0.12;
+    } else if (power === "burst") {
+      const radial = normalized(dx, dy);
+      direction = normalized(radial.x * 0.74 + lateralIntent * 0.24, radial.y * 0.74 + attackSign * 0.55);
+      speed = 566 + this.pressure * 70;
+      carry = 0.06;
+    }
+
+    this.core.vx = this.core.vx * carry + direction.x * speed;
+    this.core.vy = this.core.vy * carry + direction.y * speed;
+    this.lastMotionAngle = Math.atan2(this.core.vy, this.core.vx);
+    this.pressure = clamp(this.pressure + (power ? 0.145 : 0.085), 0, 1);
+    this.rallyContacts += 1;
+    this.lastTouch = node.owner;
+    node.contactCooldown = 0.19;
+    node.contactArmed = false;
+    node.strikeWindow = 0;
+    node.strikePending = false;
+    node.strikePower = null;
+    const sweetSpot = distance < (power === "burst" ? 105 : 78);
+    this.events.push({
+      type: "strike",
+      owner: node.owner,
+      power,
+      speed: length(this.core.vx, this.core.vy),
+      distance,
+      sweetSpot,
+      chain: this.rallyContacts,
+      direction: { ...direction },
+    });
+    return true;
+  }
+
   #resolveNodeContact(node) {
     const dx = this.core.x - node.x;
     const dy = this.core.y - node.y;
@@ -630,13 +794,18 @@ export class RiftPhysics {
       this.events.push({ type: "rebound", surface: "right-wall", speed: length(this.core.vx, this.core.vy) });
     }
 
-    const liveGoalHalfWidth = ARENA.goalHalfWidth + this.duelSurge * 14 + this.overtimeOpen * 42;
-    const inMouth = Math.abs(this.core.x - REFERENCE_WIDTH / 2) <= liveGoalHalfWidth;
-    if (inMouth && this.core.y <= ARENA.topReactorY) {
+    // RIFT BREAK is a visible, symmetric long-duel resolution: both Reactor
+    // mouths mechanically iris open and advance into the field. It never
+    // chooses a winner; it only removes safe bank angles and shortens the last
+    // defensive read so the next earned attack can finish the duel.
+    const liveGoalHalfWidth = ARENA.goalHalfWidth + this.duelSurge * 14 + this.overtimeOpen * 100;
+    const reactorAdvance = this.overtimeOpen * 84;
+    const inMouth = Math.abs(this.core.x - WORLD_WIDTH / 2) <= liveGoalHalfWidth;
+    if (inMouth && this.core.y <= ARENA.topReactorY + reactorAdvance) {
       this.#score("player");
       return;
     }
-    if (inMouth && this.core.y >= ARENA.bottomReactorY) {
+    if (inMouth && this.core.y >= ARENA.bottomReactorY - reactorAdvance) {
       this.#score("bot");
       return;
     }
@@ -698,4 +867,6 @@ export const RIFTBALL_CONSTANTS = Object.freeze({
   CONTACT_RADIUS,
   CLOSE_RADIUS,
   RELEASE_RADIUS,
+  STRIKE_REACH,
+  BURST_REACH,
 });

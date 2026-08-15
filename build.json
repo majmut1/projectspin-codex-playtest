@@ -1,13 +1,15 @@
 {
   "agent": "CODEX",
   "game": "RIFTBALL",
-  "build": "RIFT-20260815.4",
-  "source_commit": "66b4c7a5f11c1292dce8a6d63dbc9f0cac8a90d0",
-  "source_tree": "0d3895e7a08b6fd2afe98e7e1b3c0e78a887ef66",
+  "build": "RIFT-20260815.5",
+  "source_commit": "96ce0ab20addc840c2f4e970ec195cef01e7c06b",
+  "source_tree": "6bac92ed7a51e332586c7f751af03ca87198948b",
+  "orientation": "landscape",
+  "control": "left-joystick + right-tap-hold-flick-radial",
   "physics": "drive",
-  "camera": "broadcast",
+  "camera": "arena",
   "runtime": "canvas2d-web-audio",
-  "release_bytes": 158676,
-  "combined_gzip_bytes": 37153,
+  "release_bytes": 193570,
+  "combined_gzip_bytes": 44642,
   "pck": null
 }

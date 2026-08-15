@@ -7,87 +7,113 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
-  <meta name="description" content="RIFTBALL — the fastest illegal zero-g duel sport in the galaxy.">
-  <link rel="icon" href="icon.svg?v=RIFT-20260815.4" type="image/svg+xml">
-  <link rel="manifest" href="manifest.webmanifest?v=RIFT-20260815.4">
+  <meta name="description" content="RIFTBALL — landscape two-thumb zero-g duel sport.">
+  <link rel="icon" href="icon.svg?v=RIFT-20260815.5" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest?v=RIFT-20260815.5">
   <title>RIFTBALL</title>
-  <link rel="stylesheet" href="styles.css?v=RIFT-20260815.4">
+  <link rel="stylesheet" href="styles.css?v=RIFT-20260815.5">
 </head>
 <body>
-  <main id="app" aria-label="RIFTBALL zero-gravity duel sport">
-    <canvas id="game-canvas" width="390" height="844" aria-label="RIFTBALL arena"></canvas>
+  <main id="app" aria-label="RIFTBALL landscape zero-gravity duel sport">
+    <canvas id="game-canvas" width="844" height="390" aria-label="RIFTBALL landscape arena"></canvas>
 
     <section id="boot" class="screen boot-screen" aria-live="polite">
-      <div class="brand-symbol brand-symbol--boot" aria-hidden="true"><i></i><b></b><em></em></div>
-      <div class="boot-wordmark" aria-label="RIFTBALL"><span>RIFT</span><strong>BALL</strong></div>
-      <p class="eyebrow">ILLEGAL ZERO-G DUEL SPORT</p>
+      <div class="boot-lockup">
+        <div class="brand-symbol brand-symbol--boot" aria-hidden="true"><i></i><b></b><em></em></div>
+        <div>
+          <div class="boot-wordmark" aria-label="RIFTBALL"><span>RIFT</span><strong>BALL</strong></div>
+          <p class="eyebrow">LANDSCAPE COMBAT CIRCUIT</p>
+        </div>
+      </div>
       <div class="boot-track"><span></span></div>
-      <p class="build-identity">CODEX • RIFTBALL • RIFT-20260815.4</p>
+      <p class="build-identity">CODEX • RIFTBALL • RIFT-20260815.5</p>
     </section>
 
     <section id="menu" class="screen menu-screen" hidden>
-      <header class="menu-header">
+      <div class="menu-panel">
         <p class="league-kicker"><i></i> OUTER-RING CIRCUIT // UNLICENSED</p>
         <div class="menu-logo">
           <div class="brand-symbol" aria-hidden="true"><i></i><b></b><em></em></div>
           <h1><span>RIFT</span><strong>BALL</strong></h1>
         </div>
-      </header>
-      <div class="menu-spacer" aria-hidden="true"></div>
-      <div class="faceoff-strip" aria-label="You versus Wraith">
-        <div class="faceoff-side faceoff-side--you"><span>RIDER 07</span><strong>YOU</strong></div>
-        <div class="versus-mark"><i></i><span>VS</span><i></i></div>
-        <div class="faceoff-side faceoff-side--wraith"><span>RIVAL</span><strong>WRAITH</strong></div>
-      </div>
-      <div class="menu-actions">
-        <button id="play-button" class="primary-action" type="button">
-          <span>PLAY</span><b aria-hidden="true">▶</b>
-        </button>
-        <p class="menu-promise">BEND THE CORE. BREAK THEIR REACTOR.</p>
-        <p class="build-identity">CODEX • RIFTBALL • RIFT-20260815.4</p>
+        <p class="menu-fantasy">TWO THUMBS. ONE CORE.<br><strong>BREAK THEIR REACTOR.</strong></p>
+        <div class="faceoff-strip" aria-label="You versus Wraith">
+          <div class="faceoff-side faceoff-side--you"><span>RIDER 07</span><strong>YOU</strong></div>
+          <div class="versus-mark"><i></i><span>VS</span><i></i></div>
+          <div class="faceoff-side faceoff-side--wraith"><span>RIVAL</span><strong>WRAITH</strong></div>
+        </div>
+        <button id="play-button" class="primary-action" type="button"><span>PLAY</span><b aria-hidden="true">▶</b></button>
+        <p class="control-promise"><span>◉</span> MOVE <i></i> <span>◆</span> STRIKE / POWERS</p>
+        <p class="build-identity">CODEX • RIFTBALL • RIFT-20260815.5</p>
       </div>
     </section>
 
     <section id="hud" class="hud" hidden aria-label="Match HUD">
       <div class="score-rack">
-        <div class="score-side bot-score-side">
-          <div class="rider-id rider-id--wraith"><i></i><span><small>RIVAL</small><strong>WRAITH</strong></span></div>
-          <div id="bot-pips" class="reactor-pips" aria-label="Wraith Reactor health"></div>
+        <div class="score-side player-score-side">
+          <div class="rider-id rider-id--you"><i></i><span><small>RIDER 07</small><strong>YOU</strong></span></div>
+          <div id="player-pips" class="reactor-pips" aria-label="Your Reactor health"></div>
         </div>
         <div class="score-numerals"><strong id="player-score">0</strong><i></i><strong id="bot-score">0</strong></div>
-        <div class="score-side player-score-side">
-          <div class="rider-id rider-id--you"><span><small>RIDER 07</small><strong>YOU</strong></span><i></i></div>
-          <div id="player-pips" class="reactor-pips" aria-label="Your Reactor health"></div>
+        <div class="score-side bot-score-side">
+          <div class="rider-id rider-id--wraith"><span><small>RIVAL</small><strong>WRAITH</strong></span><i></i></div>
+          <div id="bot-pips" class="reactor-pips" aria-label="Wraith Reactor health"></div>
         </div>
       </div>
       <div id="territory-readout" class="territory-readout" aria-hidden="true"><span></span></div>
       <div id="status" class="status-call" aria-live="polite"></div>
-      <div id="onboarding" class="onboarding-call" aria-live="polite" hidden><i></i><span>DRAG TO MOVE</span></div>
-      <div id="duel-meter" class="duel-meter"><span></span></div>
+      <div id="onboarding" class="onboarding-call" aria-live="polite" hidden><i></i><span>MOVE</span></div>
       <div id="match-point-flag" class="match-point-flag" hidden><i></i><span>FINAL POINT</span><i></i></div>
+      <div class="duel-meter" id="duel-meter"><span></span></div>
       <button id="sound-button" class="sound-button" type="button" aria-label="Mute sound"><span></span></button>
-      <p class="game-build">CODEX • RIFTBALL • RIFT-20260815.4</p>
+      <p class="game-build">CODEX • RIFTBALL • RIFT-20260815.5</p>
+    </section>
+
+    <section id="controls" class="controls" hidden aria-label="Landscape controls">
+      <div id="move-pad" class="move-pad" role="application" aria-label="Movement joystick">
+        <div class="move-guide"><i></i><i></i><i></i><i></i></div>
+        <div id="move-stick" class="move-stick"><span></span></div>
+        <small>MOVE</small>
+      </div>
+
+      <div id="action-cluster" class="action-cluster" style="--flux:100">
+        <div class="radial-links" aria-hidden="true"><i></i><i></i></div>
+        <div class="power-option power-option--up" data-power="rush" aria-hidden="true"><b>»</b><span>RUSH</span><small>MAX SPEED</small></div>
+        <div class="power-option power-option--right" data-power="bend" aria-hidden="true"><b>↷</b><span>BEND</span><small>CURVE</small></div>
+        <div class="power-option power-option--down" data-power="brake" aria-hidden="true"><b>◇</b><span>BRAKE</span><small>KILL SPEED</small></div>
+        <div class="power-option power-option--left" data-power="burst" aria-hidden="true"><b>◎</b><span>BURST</span><small>WIDE PUSH</small></div>
+        <button id="action-button" class="action-button" type="button" aria-label="Tap to strike, hold for powers">
+          <i class="action-charge" aria-hidden="true"></i>
+          <b id="action-icon">◆</b>
+          <span id="action-label">STRIKE</span>
+          <small>TAP</small>
+        </button>
+        <div id="armed-power" class="armed-power"><span>FLUX</span><b id="flux-value">100</b></div>
+      </div>
     </section>
 
     <section id="results" class="screen result-screen" hidden>
-      <div class="result-rivalry" aria-hidden="true"><i></i><b></b><em></em></div>
       <div class="result-card">
         <p class="eyebrow">REACTOR DUEL COMPLETE</p>
         <h2 id="result-title">VICTORY</h2>
         <p id="result-score" class="result-score">3 <i></i> 0</p>
         <div id="result-stats" class="result-stats"></div>
-        <button id="replay-button" class="primary-action primary-action--rematch" type="button"><span>PLAY AGAIN</span><b aria-hidden="true">↻</b></button>
-        <button id="home-button" class="secondary-action" type="button">HOME</button>
-        <p class="build-identity">CODEX • RIFTBALL • RIFT-20260815.4</p>
+        <div class="result-actions">
+          <button id="replay-button" class="primary-action primary-action--rematch" type="button"><span>PLAY AGAIN</span><b aria-hidden="true">↻</b></button>
+          <button id="home-button" class="secondary-action" type="button">HOME</button>
+        </div>
+        <p class="build-identity">CODEX • RIFTBALL • RIFT-20260815.5</p>
       </div>
     </section>
 
     <div id="rotate-warning" class="rotate-warning" hidden>
+      <div class="rotate-phone" aria-hidden="true"><i></i></div>
       <div class="brand-symbol" aria-hidden="true"><i></i><b></b><em></em></div>
-      <p>ROTATE TO PORTRAIT</p>
+      <p>ROTATE TO LANDSCAPE</p>
+      <small>RIFTBALL IS BUILT FOR TWO THUMBS</small>
     </div>
   </main>
 
-  <script type="module" src="src/game.mjs?v=RIFT-20260815.4-r2"></script>
+  <script type="module" src="src/game.mjs?v=RIFT-20260815.5-r1"></script>
 </body>
 </html>

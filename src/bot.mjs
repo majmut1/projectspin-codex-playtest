@@ -10,7 +10,7 @@ export const BOT_STATES = Object.freeze({
 
 export const BOT_PROFILES = Object.freeze({
   sparring: Object.freeze({ reaction: 0.205, decisionInterval: 0.105, predictionHorizon: 0.44, baseError: 18, fastError: 28, aggression: 0.46, risk: 0.38, movementPrecision: 0.78 }),
-  wraith: Object.freeze({ reaction: 0.148, decisionInterval: 0.080, predictionHorizon: 0.58, baseError: 10, fastError: 20, aggression: 0.67, risk: 0.62, movementPrecision: 0.92 }),
+  wraith: Object.freeze({ reaction: 0.158, decisionInterval: 0.086, predictionHorizon: 0.56, baseError: 12, fastError: 22, aggression: 0.66, risk: 0.60, movementPrecision: 0.90 }),
   apex: Object.freeze({ reaction: 0.112, decisionInterval: 0.066, predictionHorizon: 0.66, baseError: 7, fastError: 14, aggression: 0.78, risk: 0.70, movementPrecision: 0.97 }),
 });
 
@@ -45,6 +45,8 @@ export class RiftBot {
     this.overextended = 0;
     this.lastStateChange = 0;
     this.intent = { x: 195, y: 240, strength: 0 };
+    this.actionTimer = 0;
+    this.pendingAction = null;
   }
 
   reset() {
@@ -57,11 +59,14 @@ export class RiftBot {
     this.overextended = 0;
     this.lastStateChange = 0;
     this.intent = { x: 195, y: 240, strength: 0 };
+    this.actionTimer = 0;
+    this.pendingAction = null;
   }
 
   update(dt, physics, context = {}) {
     this.time += dt;
     this.decisionTimer -= dt;
+    this.actionTimer = Math.max(0, this.actionTimer - dt);
     const core = physics.core;
     this.history.push({ time: this.time, x: core.x, y: core.y, vx: core.vx, vy: core.vy, speed: Math.hypot(core.vx, core.vy) });
     while (this.history.length > 2 && this.time - this.history[0].time > 1.25) this.history.shift();
@@ -80,6 +85,7 @@ export class RiftBot {
         this.lastStateChange = this.time;
       }
       this.target = this.#chooseTarget(observed, physics, context);
+      this.#considerAction(observed, physics, context);
     }
 
     const botNode = physics.nodes.bot;
@@ -91,6 +97,36 @@ export class RiftBot {
     this.intent.strength = clamp(0.35 + this.readConfidence * 0.45 + (this.state === BOT_STATES.SCRAMBLE ? 0.2 : 0), 0, 1);
     physics.setNodeTarget("bot", this.target.x, this.target.y);
     return this.state;
+  }
+
+  consumeAction() {
+    const action = this.pendingAction;
+    this.pendingAction = null;
+    return action;
+  }
+
+  #considerAction(core, physics, context) {
+    if (this.actionTimer > 0 || this.pendingAction) return;
+    const node = physics.nodes.bot;
+    const observedDistance = Math.hypot(core.x - node.x, core.y - node.y);
+    const tacticalReach = this.state === BOT_STATES.SCRAMBLE ? 138 : 110;
+    if (observedDistance > tacticalReach) return;
+
+    const incoming = core.vy < -28;
+    const attackable = core.y > 125 && core.y < 420;
+    const urgency = this.state === BOT_STATES.SCRAMBLE || this.state === BOT_STATES.COUNTER;
+    if (!urgency && !incoming && !attackable) return;
+
+    const riskRoll = this.random();
+    let power = null;
+    if (context.botFlux >= 40 && this.state === BOT_STATES.SCRAMBLE && riskRoll < 0.72) power = "burst";
+    else if (context.botFlux >= 26 && this.state === BOT_STATES.COUNTER && riskRoll < 0.58) power = "brake";
+    else if (context.botFlux >= 36 && this.state === BOT_STATES.PRESS && riskRoll < this.profile.risk * 0.72) power = "rush";
+    else if (context.botFlux >= 30 && this.state === BOT_STATES.TRAP && riskRoll < this.profile.risk * 0.62) power = "bend";
+
+    const timingError = (this.random() - 0.5) * (0.065 + (1 - this.profile.movementPrecision) * 0.12);
+    this.actionTimer = clamp(0.60 + timingError, 0.46, 0.86);
+    this.pendingAction = { type: "strike", power, observedDistance, state: this.state };
   }
 
   #observedCore() {
